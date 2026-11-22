@@ -26,6 +26,7 @@ LAST_SEEN = time.time()
 SRV = None
 
 DEFAULT_CFG = {
+    "version": 2,
     "timeout": 600,
     "tools": {
         "claude": {
@@ -34,12 +35,14 @@ DEFAULT_CFG = {
             "parser": "claude_stream", "color": "#d97757",
             "package": "@anthropic-ai/claude-code",
             "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit",
+            "resume_args": ["--resume", "{session}"],
             "model_flag": "--model", "default_label": "默认（账户默认）",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
                        {"id": "haiku", "label": "Haiku"}, {"id": "fable", "label": "Fable"}]},
-        "codex": {"cmd": ["codex", "exec", "--skip-git-repo-check", "{prompt}"],
-                  "parser": "raw", "color": "#10a37f",
+        "codex": {"cmd": ["codex", "exec", "--json", "--skip-git-repo-check", "{prompt}"],
+                  "parser": "codex_json", "color": "#10a37f",
+                  "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [选项] resume <ID> <问题>
                   "package": "@openai/codex",
                   "login": "codex login", "hint": "浏览器会打开，用 ChatGPT 账号登录",
                   "model_flag": "-m", "default_label": "默认（推荐模型）",
@@ -49,7 +52,9 @@ DEFAULT_CFG = {
                              {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"}, {"id": "gpt-6.1-terra", "label": "GPT-6.1 Terra"},
                              {"id": "gpt-6-luna", "label": "GPT-6 Luna"}]},
         "antigravity": {
-            "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}"], "parser": "raw", "color": "#7b61ff",
+            "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
+            "parser": "agy_stream", "color": "#7b61ff",
+            "resume_args": ["--conversation", "{session}"],
             "pty": True,  # agy -p 在非终端环境下可能卡住，用伪终端运行
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
             "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit",
@@ -84,6 +89,15 @@ def load_cfg():
             migrated[name] = spec
         migrated.setdefault("antigravity", copy.deepcopy(DEFAULT_CFG["tools"]["antigravity"]))
         cfg["tools"] = tools = migrated
+        CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    if cfg.get("version", 1) < 2:  # v2：Codex / Antigravity 改用 JSON 输出，才能拿到会话 ID 以便追问
+        old = {"codex": ["codex", "exec", "--skip-git-repo-check", "{prompt}"], "antigravity": ["agy", "-p", "{prompt}"]}
+        for name, old_cmd in old.items():
+            sp = tools.get(name)
+            if sp and sp.get("cmd") == old_cmd:
+                sp["cmd"] = list(DEFAULT_CFG["tools"][name]["cmd"])
+                sp["parser"] = DEFAULT_CFG["tools"][name]["parser"]
+        cfg["version"] = 2
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     for name, spec in tools.items():  # 旧配置补上新字段
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
@@ -369,10 +383,11 @@ def open_login(tool):
 # ---------------- 数据库 ----------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
-  tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '');
+  tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
+  thread TEXT DEFAULT '', parent TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds REAL, output TEXT,
   log TEXT, cmd TEXT, model TEXT DEFAULT '', actual_model TEXT DEFAULT '', effort TEXT DEFAULT '',
-  PRIMARY KEY(run_id, tool));
+  session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
 CREATE TABLE IF NOT EXISTS ratings(run_id TEXT, tool TEXT, score INTEGER, note TEXT,
   PRIMARY KEY(run_id, tool));
 """
@@ -381,7 +396,8 @@ DB_LOCK = threading.Lock()
 
 def migrate(c):  # 旧数据库补列
     for table, col in (("runs", "models"), ("outputs", "model"), ("outputs", "actual_model"),
-                       ("runs", "efforts"), ("outputs", "effort")):
+                       ("runs", "efforts"), ("outputs", "effort"), ("runs", "thread"), ("runs", "parent"),
+                       ("outputs", "session")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     c.commit()
@@ -464,15 +480,128 @@ class ClaudeStream:
                     self.text_seen = True
             return res
         if t == "system" and o.get("subtype") == "init":
-            return [("meta", o.get("model") or ""), ("log", f"[init] model={o.get('model')}\n")]
+            return [("meta", o.get("model") or ""), ("session", o.get("session_id") or ""),
+                    ("log", f"[init] model={o.get('model')}\n")]
         if t == "result":
-            res = []
+            res = [("session", o.get("session_id") or "")]
             if not self.delta and not self.text_seen and o.get("result"):
                 res.append(("out", o["result"]))
             res.append(("log", f"[result] turns={o.get('num_turns')} cost=${o.get('total_cost_usd')} "
                                f"duration={o.get('duration_ms')}ms\n"))
             return res
         return []
+
+
+class LineParser:
+    def __init__(self):
+        self.buf = ""
+
+    def feed(self, chunk):
+        self.buf += chunk
+        out = []
+        while "\n" in self.buf:
+            line, self.buf = self.buf.split("\n", 1)
+            out += self._line(line)
+        return out
+
+    def flush(self):
+        rest, self.buf = self.buf, ""
+        return self._line(rest)
+
+    def _line(self, line):
+        line = line.strip()
+        if not line:
+            return []
+        try:
+            o = json.loads(line)
+        except ValueError:
+            return [("out", line + "\n")]
+        return self.event(o) if isinstance(o, dict) else []
+
+
+class CodexJson(LineParser):
+    """解析 `codex exec --json` 的 JSONL（thread.started / item.* / turn.*）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.sent, self.any_out = {}, False
+
+    def event(self, o):
+        t = o.get("type", "")
+        if t == "thread.started":
+            return [("session", o.get("thread_id") or "")]
+        if t.startswith("item."):
+            it = o.get("item") or {}
+            ty, iid = it.get("type"), it.get("id", "")
+            if ty in ("agent_message", "assistant_message") and it.get("text"):
+                txt, prev = it["text"], self.sent.get(iid, "")
+                delta = txt[len(prev):] if txt.startswith(prev) else txt
+                sep = "\n\n" if (not prev and self.any_out) else ""
+                self.sent[iid] = txt
+                if delta:
+                    self.any_out = True
+                    return [("out", sep + delta)]
+                return []
+            if t == "item.completed" and ty == "reasoning" and it.get("text"):
+                return [("log", "[思考] " + it["text"][:500] + "\n")]
+            if t == "item.started" and ty == "command_execution":
+                return [("log", f"[命令] {it.get('command', '')}\n")]
+            if ty == "error":
+                return [("log", f"[错误] {it.get('message', '')}\n")]
+            return []
+        if t == "turn.completed":
+            return [("log", f"[用量] {json.dumps(o.get('usage') or {}, ensure_ascii=False)}\n")]
+        if t in ("turn.failed", "error"):
+            return [("log", f"[{t}] {json.dumps(o.get('error') or o.get('message') or o, ensure_ascii=False)[:500]}\n")]
+        return []
+
+
+class AgyStream(LineParser):
+    """解析 `agy -p … --output-format stream-json` 的 NDJSON（init / step_update / result）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.got = False
+
+    def event(self, o):
+        ev = o.get("event") or o.get("type")
+        d = o.get("data") if isinstance(o.get("data"), dict) else o
+        res = []
+        cid = d.get("conversation_id") or o.get("conversation_id")
+        if cid:
+            res.append(("session", str(cid)))
+        if ev == "init":
+            model = d.get("model") or (d.get("config") or {}).get("model") if isinstance(d.get("config"), dict) else d.get("model")
+            if model:
+                res.append(("meta", str(model)))
+        elif ev == "step_update":
+            if d.get("step_type") == "agent_response" and d.get("text_delta"):
+                self.got = True
+                res.append(("out", d["text_delta"]))
+            elif d.get("step_type") and d.get("status") == "DONE":
+                res.append(("log", f"[步骤] {d.get('step_type')}\n"))
+        elif ev == "result":
+            if not self.got and d.get("response"):
+                res.append(("out", d["response"]))
+            if d.get("status") and d.get("status") != "SUCCESS":
+                res.append(("log", f"[状态] {d.get('status')} {d.get('error') or ''}\n"))
+            if d.get("usage"):
+                res.append(("log", f"[用量] {json.dumps(d['usage'], ensure_ascii=False)}\n"))
+        return res
+
+
+PARSERS = {"claude_stream": lambda: ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
+
+
+def build_transcript(history, prompt):
+    parts = ["下面是我们之前的对话记录，请在此基础上回答最后的新问题。\n"]
+    for i, (q_, a_) in enumerate(history, 1):
+        a_ = (a_ or "（没有回答）").strip()
+        if len(a_) > 6000:
+            a_ = a_[:6000] + "\n……（后面省略）"
+        parts.append(f"【第 {i} 轮 我的问题】\n{q_}\n\n【第 {i} 轮 你的回答】\n{a_}\n")
+    parts.append(f"【新问题】\n{prompt}")
+    return "\n".join(parts)
 
 
 def kill(p):
@@ -488,22 +617,36 @@ def kill(p):
 MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # 如 Codex 在 stderr 打印的 "model: gpt-…"
 
 
-def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort=""):
-    base, extra = list(spec["cmd"]), []
+def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None):
+    base, extra, note = list(spec["cmd"]), [], ""
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
     if effort and spec.get("effort_args"):
         extra += [a.replace("{effort}", effort) for a in spec["effort_args"]]
+    rargs = [a.replace("{session}", session) for a in spec.get("resume_args") or []] if session else []
+    if rargs and spec.get("resume_pos") != "prompt":
+        extra += rargs
     if extra:
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
         if i > 0 and base[i - 1].startswith("-"):  # 如 agy -p {prompt}：插到 -p 前面，避免拆开 "-p 问题"
             i -= 1
         base[i:i] = extra
+    if rargs and spec.get("resume_pos") == "prompt":  # 子命令形式，紧挨在问题前面
+        i = base.index("{prompt}") if "{prompt}" in base else len(base)
+        base[i:i] = rargs
+    if rargs:
+        note = f"[续接] 沿用 {name} 自己的会话 {session[:12]}…\n"
+    elif history:
+        prompt = build_transcript(history, prompt)
+        note = f"[续接] 没有拿到上一轮的会话 ID，改为把之前 {len(history)} 轮问答附在问题前面\n"
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     shown = " ".join(shlex.quote(a) for a in base)
     out, log, t0, status = [], [], time.time(), "ok"
-    actual, errhead = [""], [""]
+    actual, errhead, sess = [""], [""], [""]
     run.emit({"tool": name, "type": "start", "cmd": shown, "model": model, "effort": effort})
+    if note:
+        log.append(note)
+        run.emit({"tool": name, "type": "log", "data": note})
     env = child_env()
     exe = which(cmd[0])
     use_pty = bool(spec.get("pty")) and os.name == "posix"
@@ -536,10 +679,14 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort=""):
         log.append(f"{e}\n")
     if p:
         run.procs[name] = p
-        parser = ClaudeStream() if spec.get("parser") == "claude_stream" else None
+        parser = PARSERS[spec["parser"]]() if spec.get("parser") in PARSERS else None
         ptx = PtyText() if use_pty else None
 
         def push(kind, text):
+            if kind == "session":
+                if text:
+                    sess[0] = text
+                return
             if kind == "meta":
                 if text and not actual[0]:
                     actual[0] = text
@@ -599,9 +746,9 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort=""):
     secs = round(time.time() - t0, 1)
     if not p:
         run.emit({"tool": name, "type": "log", "data": "".join(log)})
-    q("INSERT OR REPLACE INTO outputs(run_id, tool, status, seconds, output, log, cmd, model, actual_model, effort) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?)",
-      (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort))
+    q("INSERT OR REPLACE INTO outputs(run_id, tool, status, seconds, output, log, cmd, model, actual_model, effort, session) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort, sess[0]))
     run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
     with run.cond:
         run.pending.discard(name)
@@ -611,9 +758,26 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort=""):
         run.cond.notify_all()
 
 
-def start_run(prompt, tools, cwd, tag, models=None, efforts=None):
+def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None):
     cfg = load_cfg()
     on = enabled_tools(cfg)
+    thread, parent_id, sessions, histories = "", "", {}, {}
+    if parent:  # 追问：沿用上一轮的工具、模型、effort、目录，并找各工具的会话 ID
+        p = q("SELECT * FROM runs WHERE id=?", (parent,), one=True)
+        if not p:
+            raise ValueError("要追问的那一轮不存在")
+        thread, parent_id = p.get("thread") or p["id"], p["id"]
+        q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
+        tools = json.loads(p["tools"] or "[]")
+        models, efforts = json.loads(p.get("models") or "{}"), json.loads(p.get("efforts") or "{}")
+        cwd, tag = p.get("cwd") or None, p.get("tag") or ""
+        for t in tools:
+            rows = q("""SELECT r.prompt, o.output, o.session, o.status FROM runs r
+                        LEFT JOIN outputs o ON o.run_id=r.id AND o.tool=?
+                        WHERE r.id=? OR r.thread=? ORDER BY r.created_at""", (t, thread, thread))
+            histories[t] = [(x["prompt"], x["output"] or "") for x in rows]
+            ok = [x["session"] for x in rows if x["session"] and x["status"] == "ok"]
+            sessions[t] = ok[-1] if ok else ""
     tools = [t for t in tools if t in on] or on
     for rid0 in [k for k, r in RUNS.items() if r.finished_at and time.time() - r.finished_at > 1800]:
         RUNS.pop(rid0, None)  # 完成 30 分钟后从内存移除，之后从数据库回放
@@ -621,17 +785,19 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None):
     models = {t: str((models or {}).get(t) or "").strip() for t in tools}
     efforts = {t: e if re.fullmatch(r"[a-z]{1,12}", e := str((efforts or {}).get(t) or "").strip()) else ""
                for t in tools}
-    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts) VALUES(?,?,?,?,?,?,?,?,?)",
-      (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "", json.dumps(models), json.dumps(efforts)))
+    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
+                                        json.dumps(models), json.dumps(efforts), thread or rid, parent_id))
     run = Run(rid, tools)
     RUNS[rid] = run
     for t in tools:
         threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, cwd, cfg.get("timeout", 600),
-                                                 models[t], efforts[t]), daemon=True).start()
+                                                 models[t], efforts[t], sessions.get(t, ""),
+                                                 None if sessions.get(t) else histories.get(t)), daemon=True).start()
     return rid, tools, models, efforts
 
 
-def run_detail(rid):
+def run_detail(rid, with_turns=True):
     r = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
     if not r:
         return None
@@ -642,6 +808,10 @@ def run_detail(rid):
     r["ratings"] = q("SELECT tool, score, note FROM ratings WHERE run_id=?", (rid,))
     live = RUNS.get(rid)
     r["running"] = bool(live and not live.finished_at)
+    if with_turns:
+        root = r.get("thread") or rid
+        ids = [x["id"] for x in q("SELECT id FROM runs WHERE id=? OR thread=? ORDER BY created_at", (root, root))]
+        r["turns"] = [run_detail(i, False) if i != rid else {k: v for k, v in r.items() if k != "turns"} for i in ids]
     return r
 
 
@@ -728,9 +898,14 @@ class H(BaseHTTPRequestHandler):
             limit = max(1, min(int(qs.get("limit") or 200), 500))
             rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd,
                  (SELECT group_concat(tool||' '||score, '，') FROM ratings r WHERE r.run_id=runs.id AND score>0) scores,
-                 (SELECT group_concat(tool||':'||status, '|') FROM outputs o WHERE o.run_id=runs.id) st
-                 FROM runs WHERE prompt LIKE ? AND (?='' OR tag=?) ORDER BY created_at DESC LIMIT ?""",
-                     (f"%{kw}%", tag, tag, limit))
+                 (SELECT COUNT(*) FROM runs c WHERE c.thread=runs.id) nturns,
+                 (SELECT c.winner FROM runs c WHERE c.id=runs.id OR c.thread=runs.id ORDER BY c.created_at DESC LIMIT 1) last_winner,
+                 (SELECT group_concat(tool||':'||status, '|') FROM outputs o WHERE o.run_id=
+                    (SELECT c.id FROM runs c WHERE c.id=runs.id OR c.thread=runs.id ORDER BY c.created_at DESC LIMIT 1)) st
+                 FROM runs WHERE (thread IS NULL OR thread='' OR thread=runs.id)
+                   AND (prompt LIKE ? OR EXISTS(SELECT 1 FROM runs c WHERE c.thread=runs.id AND c.prompt LIKE ?))
+                   AND (?='' OR tag=?) ORDER BY created_at DESC LIMIT ?""",
+                     (f"%{kw}%", f"%{kw}%", tag, tag, limit))
             self._json({"runs": rows})
         elif p == "/api/stats":
             tag = qs.get("tag", "")
@@ -756,6 +931,12 @@ class H(BaseHTTPRequestHandler):
             prompt = (b.get("prompt") or "").strip()
             if not prompt:
                 return self._json({"error": "问题为空"}, 400)
+            if b.get("parent"):
+                try:
+                    rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+                return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"]})
             cwd = os.path.expanduser(b.get("cwd") or "").strip() or None
             if cwd and not os.path.isdir(cwd):
                 return self._json({"error": f"目录不存在: {cwd}"}, 400)
@@ -788,11 +969,12 @@ class H(BaseHTTPRequestHandler):
         elif p == "/api/winner":
             q("UPDATE runs SET winner=? WHERE id=?", (b.get("winner") or "", b["run_id"]))
             self._json({"ok": True})
-        elif p.startswith("/api/delete/"):
+        elif p.startswith("/api/delete/"):  # 删除首问时连同整条对话一起删除
             rid = p.rsplit("/", 1)[1]
-            for t in ("outputs", "ratings"):
-                q(f"DELETE FROM {t} WHERE run_id=?", (rid,))
-            q("DELETE FROM runs WHERE id=?", (rid,))
+            for x in q("SELECT id FROM runs WHERE id=? OR thread=?", (rid, rid)):
+                for t in ("outputs", "ratings"):
+                    q(f"DELETE FROM {t} WHERE run_id=?", (x["id"],))
+                q("DELETE FROM runs WHERE id=?", (x["id"],))
             self._json({"ok": True})
         else:
             self._json({"error": "not found"}, 404)
@@ -809,7 +991,7 @@ class H(BaseHTTPRequestHandler):
                 for o in q("SELECT * FROM outputs WHERE run_id=?", (rid,)):
                     send({"tool": o["tool"], "type": "start", "cmd": o["cmd"], "model": o.get("model") or "",
                           "effort": o.get("effort") or ""})
-                    if o.get("actual_model"):
+                    if o.get("actual_model"):  # noqa
                         send({"tool": o["tool"], "type": "meta", "model": o["actual_model"]})
                     send({"tool": o["tool"], "type": "out", "data": o["output"]})
                     send({"tool": o["tool"], "type": "log", "data": o["log"]})
@@ -947,7 +1129,7 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .rh{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;gap:14px;padding:12px 16px 12px 12px;cursor:pointer;border-radius:14px}
 .rh:hover .rq{color:var(--ink)}
 .chev{display:grid;place-items:center;width:24px;height:24px;color:var(--muted);transition:transform .18s}
-.round.open .chev{transform:rotate(90deg)}
+.round.open>.rh .chev{transform:rotate(90deg)}
 .rq{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14.5px;color:color-mix(in srgb,var(--ink) 85%,var(--muted))}
 .round.open .rq{white-space:pre-wrap;overflow:visible;font-size:15.5px;font-weight:600;color:var(--ink);line-height:1.6}
 .lanebar{display:flex;gap:3px}
@@ -963,6 +1145,20 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .rbody{padding:2px 14px 14px}
 .cols{display:grid;gap:14px}
 .rfoot{display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--muted);font-size:12.5px}
+.turn+.turn{border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+.th2{display:flex;gap:8px;align-items:center;padding:2px 2px 10px;cursor:pointer;color:var(--muted);font-size:13.5px;border-radius:8px}
+.round:not(.multi) .th2{display:none}
+.th2 .tn{flex:none;font-size:12px;padding:1px 8px;border-radius:999px;background:var(--soft)}
+.th2 .tq{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.turn:not(.folded) .th2 .tq{white-space:pre-wrap;color:var(--ink);font-weight:600}
+.turn:not(.folded) .th2 .chev{transform:rotate(90deg)}
+.turn.folded .tbody{display:none}
+.turn.folded .th2{padding-bottom:2px}
+.chev.sm{width:18px;height:18px}
+.follow{display:flex;gap:10px;align-items:flex-end;margin-top:16px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:14px;background:var(--solid);transition:box-shadow .2s,border-color .2s}
+.follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
+.fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
+.fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
 
 /* 单列 */
 .col{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--solid);overflow:hidden}
@@ -1176,47 +1372,90 @@ $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(
   else SEL[t].model=s.value;
   ls.set('arenaSel',SEL);renderLanes()});
 
-/* ---------- 每一轮 ---------- */
-const ROUNDS=new Map(),feed=$('#feed');
+/* ---------- 对话线程与每一轮 ---------- */
+// 一张卡片 = 一个对话线程（th）；线程里每次提问 = 一轮（r），每轮单独打分、计入统计
+const ROUNDS=new Map(),TURNS=new Map(),feed=$('#feed');
 const segCls=st=>!st?'':st==='run'?'run':st==='ok'?'ok':'bad';
 function stateOf(s){if(!s.status)return['排队中',''];if(s.status==='run')return['生成中','run'];if(s.status==='ok')return['完成','ok'];
   if(/^exit /.test(s.status))return['出错 '+s.status.slice(5),'bad'];return[s.status,'bad']}
 const modelText=(r,t)=>{const s=r.S[t];return s&&s.actual?s.actual:modelLabel(t,(s&&s.model)||r.models[t]||'')};
+const lastTurn=th=>th.turns[th.turns.length-1];
+const winText=w=>w==='tie'?'平手':'最佳 '+esc(tname(w));
 
 function makeRound(meta){
-  const r={id:meta.id,meta,tools:meta.tools||[],models:meta.models||{},efforts:meta.efforts||{},S:{},winner:meta.winner||'',es:null,built:false,open:false,allFull:false};
-  ROUNDS.set(r.id,r);
-  const el=r.el=document.createElement('article');el.className='round';
+  const th={id:meta.id,meta,tools:meta.tools||[],turns:[],built:false,open:false};
+  ROUNDS.set(th.id,th);
+  const el=th.el=document.createElement('article');el.className='round';
   el.innerHTML=`<header class="rh" tabindex="0" aria-expanded="false">
     <span class="chev">${svg(I.chev)}</span><span class="rq"></span>
-    <span class="lanebar" aria-hidden="true">${r.tools.map(t=>`<i data-t="${esc(t)}" style="--c:${esc(color(t))}"></i>`).join('')}</span>
-    <span class="rmeta"><span class="winc"></span><span class="tagc"></span><time></time></span>
-    <span class="ract"><button class="btn sm stop" hidden>停止</button><button class="btn sm ghost rerun" title="用同样的工具和模型再问一次">重跑</button></span>
+    <span class="lanebar" aria-hidden="true">${th.tools.map(t=>`<i data-t="${esc(t)}" style="--c:${esc(color(t))}"></i>`).join('')}</span>
+    <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="tagc"></span><time></time></span>
+    <span class="ract"><button class="btn sm stop" hidden>停止</button><button class="btn sm ghost rerun" title="把首个问题作为新对话再问一次">重跑</button></span>
   </header>
-  <div class="rbody" hidden><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
-    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button><span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
+  <div class="rbody" hidden><div class="turns"></div>
+    <div class="follow"><textarea class="fq" rows="1" placeholder="接着追问，各工具会沿用自己的上下文回答" aria-label="追问"></textarea><button class="btn primary fgo">追问</button></div>
+    <p class="fhint">沿用上一轮的工具、模型和 effort。<kbd>⌘</kbd> <kbd>Enter</kbd> 发送</p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
   (meta.st||'').split('|').filter(Boolean).forEach(x=>{const i=x.indexOf(':'),seg=$(`.lanebar i[data-t="${CSS.escape(x.slice(0,i))}"]`,el);if(seg)seg.className=segCls(x.slice(i+1))});
-  paintWinner(r);
+  const w=meta.last_winner??meta.winner;if(w)$('.winc',el).innerHTML=`<span class="chip win">${winText(w)}</span>`;
+  if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${meta.nturns} 轮</span>`;
   const rh=$('.rh',el);
-  rh.onclick=e=>{if(!e.target.closest('button'))setOpen(r,!r.open)};
-  rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(r,!r.open)}};
-  $('.rerun',el).onclick=()=>send(meta.prompt,r.tools,r.models,r.efforts,meta.tag||'',meta.cwd||'');
-  $('.stop',el).onclick=()=>post('/api/cancel/'+encodeURIComponent(r.id)).catch(toast);
-  $('.tie',el).onclick=()=>setWinner(r,r.winner==='tie'?'':'tie');
-  $('.allfull',el).onclick=e=>{r.allFull=!r.allFull;e.target.textContent=r.allFull?'全部收起':'全部展开全文';r.tools.forEach(t=>{if(r.S[t]){r.S[t].full=r.allFull;paint(r,t)}})};
-  return r;
+  rh.onclick=e=>{if(!e.target.closest('button'))setOpen(th,!th.open)};
+  rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(th,!th.open)}};
+  $('.rerun',el).onclick=()=>send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'');
+  $('.stop',el).onclick=()=>th.turns.filter(r=>r.running).forEach(r=>post('/api/cancel/'+encodeURIComponent(r.id)).catch(toast));
+  const fq=$('.fq',el);
+  fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
+  fq.onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();follow(th)}};
+  $('.fgo',el).onclick=()=>follow(th);
+  return th;
 }
-function setOpen(r,open,live){r.open=open;r.el.classList.toggle('open',open);$('.rbody',r.el).hidden=!open;$('.rh',r.el).setAttribute('aria-expanded',open);
-  if(open&&!r.built)build(r,live)}
-async function build(r,live){
-  r.built=true;const cols=$('.cols',r.el);cols.innerHTML='';
-  for(const t of r.tools){r.S[t]={out:'',log:'',status:'',secs:null,t0:null,raw:false,score:0,note:'',model:r.models[t]||'',effort:r.efforts[t]||'',actual:'',full:false};makeCol(r,t,cols)}
-  if(!live){try{const d=await api('/api/run/'+encodeURIComponent(r.id));r.winner=d.winner||'';r.meta.cwd=d.cwd;
-    for(const x of d.ratings)if(r.S[x.tool]){Object.assign(r.S[x.tool],{score:x.score,note:x.note||''});$('.note',r.S[x.tool].el).value=x.note||'';paintStars(r,x.tool)}
-    paintWinner(r)}catch(e){toast(e)}}
-  openStream(r);
+function setOpen(th,open){th.open=open;th.el.classList.toggle('open',open);$('.rbody',th.el).hidden=!open;$('.rh',th.el).setAttribute('aria-expanded',open);
+  if(open&&!th.built)buildThread(th)}
+async function buildThread(th){
+  th.built=true;const box=$('.turns',th.el);box.innerHTML='<p class="ph">正在载入…</p>';
+  try{const d=await api('/api/run/'+encodeURIComponent(th.id));box.innerHTML='';th.meta.cwd=d.cwd;
+    (d.turns&&d.turns.length?d.turns:[d]).forEach((t,i)=>fillTurn(makeTurn(th,norm(t),i),t));
+    foldOld(th);paintHead(th)}
+  catch(e){box.innerHTML='';th.built=false;toast(e)}
+}
+function makeTurn(th,meta,idx){
+  const r={id:meta.id,meta,th,idx,tools:meta.tools||[],models:meta.models||{},efforts:meta.efforts||{},S:{},winner:meta.winner||'',es:null,allFull:false,running:false,folded:false};
+  TURNS.set(r.id,r);th.turns.push(r);
+  const el=r.el=document.createElement('section');el.className='turn';
+  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">第 ${idx+1} 轮</span><span class="tq"></span><span class="tsum"></span></div>
+    <div class="tbody"><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
+    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button><span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
+  $('.tq',el).textContent=meta.prompt;
+  const h2=$('.th2',el);h2.onclick=()=>fold(r,!r.folded);
+  h2.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fold(r,!r.folded)}};
+  $('.tie',el).onclick=()=>setWinner(r,r.winner==='tie'?'':'tie');
+  $('.allfull',el).onclick=e=>{r.allFull=!r.allFull;e.target.textContent=r.allFull?'全部收起':'全部展开全文';r.tools.forEach(t=>{r.S[t].full=r.allFull;paint(r,t)})};
+  $('.turns',th.el).appendChild(el);
+  for(const t of r.tools){r.S[t]={out:'',log:'',status:'',secs:null,t0:null,raw:false,score:0,note:'',model:r.models[t]||'',effort:r.efforts[t]||'',actual:'',full:false};makeCol(r,t,$('.cols',el))}
+  paintWinner(r);return r;
+}
+function fillTurn(r,d){   // 已完成的轮次直接用数据库里的结果；还在跑的才接流
+  r.winner=d.winner||'';
+  for(const x of d.ratings||[])if(r.S[x.tool]){Object.assign(r.S[x.tool],{score:x.score,note:x.note||''});$('.note',r.S[x.tool].el).value=x.note||'';paintStars(r,x.tool)}
+  paintWinner(r);
+  if(d.running){openStream(r);return}
+  const got=new Set();
+  for(const o of d.outputs||[])if(r.S[o.tool]){got.add(o.tool);Object.assign(r.S[o.tool],{out:o.output||'',log:o.log||'',status:o.status,secs:o.seconds,
+    actual:o.actual_model||'',model:o.model||r.S[o.tool].model,effort:o.effort||r.S[o.tool].effort});$('.ch b',r.S[o.tool].el).title=o.cmd||''}
+  for(const t of r.tools){if(!got.has(t))r.S[t].status='已中断';paint(r,t)}
+}
+function fold(r,f){r.folded=f;r.el.classList.toggle('folded',f);$('.th2',r.el).setAttribute('aria-expanded',!f)}
+function foldOld(th){th.turns.forEach((r,i)=>fold(r,i<th.turns.length-1))}
+function paintHead(th){
+  const last=lastTurn(th),el=th.el;if(!last)return;
+  el.classList.toggle('multi',th.turns.length>1);
+  $('.nturn',el).innerHTML=th.turns.length>1?`<span class="chip">${th.turns.length} 轮</span>`:'';
+  for(const t of th.tools){const seg=$(`.lanebar i[data-t="${CSS.escape(t)}"]`,el);if(seg)seg.className=segCls(last.S[t]?.status)}
+  $('.winc',el).innerHTML=last.winner?`<span class="chip win">${winText(last.winner)}</span>`:'';
+  const busy=th.turns.some(r=>r.running);
+  $('.stop',el).hidden=!busy;el.classList.toggle('running',busy);$('.fgo',el).disabled=busy;
 }
 function makeCol(r,t,parent){
   const s=r.S[t],c=s.el=document.createElement('section');c.className='col';c.style.setProperty('--c',color(t));
@@ -1262,12 +1501,12 @@ function render(r,t){
     +(s.effort?`\nEffort：${effLabel(s.effort)}`:'');
   const cost=(s.log.match(/cost=\$([\d.]+)/)||[])[1];$('.cost',c).textContent=cost?`　约 $${(+cost).toFixed(3)}`:'';
   $('.raw',c).setAttribute('aria-pressed',s.raw);
-  const seg=$(`.lanebar i[data-t="${CSS.escape(t)}"]`,r.el);if(seg)seg.className=segCls(s.status);
+  if(r===lastTurn(r.th))paintHead(r.th);
   if(READER.r===r&&READER.t===t)renderReader(false);
 }
-setInterval(()=>{for(const r of ROUNDS.values()){if(!r.built)continue;for(const t of r.tools){const s=r.S[t],el=s&&s.el&&$('.tm',s.el);if(!el)continue;
-  el.textContent=s.secs!=null?s.secs+'s':s.t0?((Date.now()-s.t0)/1000).toFixed(1)+'s':''}}},200);
-function setRunning(r,on){$('.stop',r.el).hidden=!on;r.el.classList.toggle('running',on)}
+setInterval(()=>{for(const r of TURNS.values())for(const t of r.tools){const s=r.S[t],el=s&&s.el&&$('.tm',s.el);if(!el)continue;
+  el.textContent=s.secs!=null?s.secs+'s':s.t0?((Date.now()-s.t0)/1000).toFixed(1)+'s':''}},200);
+function setRunning(r,on){r.running=on;paintHead(r.th)}
 function openStream(r){
   if(r.es)r.es.close();
   const es=r.es=new EventSource(`/api/stream/${encodeURIComponent(r.id)}?token=${TOKEN}`);
@@ -1283,18 +1522,30 @@ function openStream(r){
 function paintStars(r,t){$$('.star',r.S[t].el).forEach(b=>b.classList.toggle('on',+b.dataset.v<=r.S[t].score))}
 function rate(r,t,v){r.S[t].score=v;paintStars(r,t);post('/api/rate',{run_id:r.id,tool:t,score:v,note:r.S[t].note}).catch(toast)}
 function paintWinner(r){const w=r.winner;
-  $('.winc',r.el).innerHTML=w?`<span class="chip win">${w==='tie'?'平手':'最佳 '+esc(tname(w))}</span>`:'';
   for(const t in r.S){const c=r.S[t].el;if(c){c.classList.toggle('won',w===t);$('.win',c).classList.toggle('on',w===t)}}
-  $('.tie',r.el).classList.toggle('on',w==='tie')}
+  $('.tie',r.el).classList.toggle('on',w==='tie');
+  $('.tsum',r.el).innerHTML=w?`<span class="chip win">${winText(w)}</span>`:'';
+  if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
 async function send(prompt,tools,models,efforts,tag,cwd){
   try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
-    const r=makeRound({id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd});
-    $('#empty').hidden=true;feed.prepend(r.el);setOpen(r,true,true);
+    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd};
+    const th=makeRound(meta);th.built=true;
+    $('#empty').hidden=true;feed.prepend(th.el);
+    const r=makeTurn(th,meta,0);setOpen(th,true);paintHead(th);openStream(r);
     window.scrollTo({top:0,behavior:'smooth'});return true}
   catch(e){toast(e);return false}
+}
+async function follow(th){
+  const fq=$('.fq',th.el),p=fq.value.trim(),last=lastTurn(th);if(!p)return fq.focus();if(!last)return;
+  if(th.turns.some(r=>r.running))return toast('上一轮还在生成，等它结束再追问');
+  try{const d=await post('/api/run',{prompt:p,parent:last.id});
+    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:''},th.turns.length);
+    foldOld(th);paintHead(th);openStream(r);fq.value='';fq.style.height='auto';
+    r.el.scrollIntoView({behavior:'smooth',block:'start'})}
+  catch(e){toast(e)}
 }
 function submitComposer(){
   const p=$('#prompt').value.trim();if(!p)return $('#prompt').focus();
@@ -1307,21 +1558,22 @@ function autosize(){const p=$('#prompt');p.style.height='auto';p.style.height=Ma
 $('#prompt').addEventListener('input',autosize);
 $('#prompt').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();submitComposer()}});
 $('#go').onclick=submitComposer;
-$('#collapseAll').onclick=()=>{for(const r of ROUNDS.values())if(r.open)setOpen(r,false)};
+$('#collapseAll').onclick=()=>{for(const th of ROUNDS.values())if(th.open)setOpen(th,false)};
 const pj=(v,d)=>typeof v==='string'?(()=>{try{return JSON.parse(v||'null')??d}catch(e){return d}})():(v||d);
 const norm=m=>({...m,tools:pj(m.tools,[]),models:pj(m.models,{}),efforts:pj(m.efforts,{})});
 async function loadFeed(){
-  const d=await api('/api/history?limit=20');feed.innerHTML='';ROUNDS.clear();
+  const d=await api('/api/history?limit=20');feed.innerHTML='';ROUNDS.clear();TURNS.clear();
   for(const m of d.runs)feed.appendChild(makeRound(norm(m)).el);
   $('#empty').hidden=d.runs.length>0;
   const first=ROUNDS.values().next().value;if(first)setOpen(first,true);
 }
 async function openRun(id){
-  show('compare');let r=ROUNDS.get(id);
-  if(!r){const d=await api('/api/run/'+encodeURIComponent(id));
-    r=makeRound(norm({...d,st:d.outputs.map(o=>o.tool+':'+o.status).join('|')}));feed.prepend(r.el);$('#empty').hidden=true}
-  for(const x of ROUNDS.values())if(x.open&&x!==r)setOpen(x,false);
-  setOpen(r,true);r.el.scrollIntoView({behavior:'smooth',block:'start'});
+  show('compare');let th=ROUNDS.get(id);
+  if(!th){const d=await api('/api/run/'+encodeURIComponent(id)),turns=d.turns||[d],last=turns[turns.length-1];
+    th=makeRound(norm({...d,nturns:turns.length,last_winner:last.winner,st:(last.outputs||[]).map(o=>o.tool+':'+o.status).join('|')}));
+    feed.prepend(th.el);$('#empty').hidden=true}
+  for(const x of ROUNDS.values())if(x.open&&x!==th)setOpen(x,false);
+  setOpen(th,true);th.el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 /* ---------- 阅读模式 ---------- */
@@ -1347,13 +1599,13 @@ async function loadHistory(){
   const d=await api(`/api/history?q=${encodeURIComponent($('#hq').value)}&tag=${encodeURIComponent($('#htag').value)}`);
   $('#hlist').innerHTML=d.runs.map(r=>`<li class="hitem"><div class="hmain"><div class="hq">${esc(r.prompt)}</div>
     <div class="hmeta"><time>${fmtTime(r.created_at)}</time>${r.tag?`<span class="chip">${esc(r.tag)}</span>`:''}
-    ${r.winner?`<span class="chip win">${r.winner==='tie'?'平手':'最佳 '+esc(tname(r.winner))}</span>`:''}<span>${esc(r.scores||'未评分')}</span></div></div>
+    ${r.nturns>1?`<span class="chip">${r.nturns} 轮</span>`:''}${(r.last_winner||r.winner)?`<span class="chip win">${winText(r.last_winner||r.winner)}</span>`:''}<span>${esc(r.scores||'未评分')}</span></div></div>
     <div class="hact"><button class="btn sm" data-a="open" data-id="${esc(r.id)}">打开</button><button class="btn sm ghost" data-a="del" data-id="${esc(r.id)}">删除</button></div></li>`).join('')
     ||'<li class="hitem" style="color:var(--muted)">没有找到记录</li>';
 }
 $('#hlist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.id;
   if(b.dataset.a==='open')openRun(id).catch(toast);
-  else if(confirm('删除这条记录？')){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
+  else if(confirm('删除这条对话（包括所有追问）？')){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
 let hqT;$('#hq').oninput=()=>{clearTimeout(hqT);hqT=setTimeout(loadHistory,250)};$('#htag').onchange=loadHistory;
 
 /* ---------- 统计 ---------- */
