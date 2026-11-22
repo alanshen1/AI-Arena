@@ -35,9 +35,9 @@ DEFAULT_CFG = {
                     "--verbose", "--include-partial-messages"],
             "parser": "claude_stream", "color": "#d97757",
             "package": "@anthropic-ai/claude-code",
-            "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit",
+            "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit", "hint_en": "Follow the prompts to sign in, then type /exit",
             "resume_args": ["--resume", "{session}"],
-            "model_flag": "--model", "default_label": "默认（账户默认）",
+            "model_flag": "--model", "default_label": "默认（账户默认）", "default_label_en": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
                        {"id": "haiku", "label": "Haiku"}, {"id": "fable", "label": "Fable"}]},
@@ -45,8 +45,8 @@ DEFAULT_CFG = {
                   "parser": "codex_json", "color": "#10a37f",
                   "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [选项] resume <ID> <问题>
                   "package": "@openai/codex",
-                  "login": "codex login", "hint": "浏览器会打开，用 ChatGPT 账号登录",
-                  "model_flag": "-m", "default_label": "默认（推荐模型）",
+                  "login": "codex login", "hint": "浏览器会打开，用 ChatGPT 账号登录", "hint_en": "A browser opens; sign in with your ChatGPT account",
+                  "model_flag": "-m", "default_label": "默认（推荐模型）", "default_label_en": "Default (recommended)",
                   "effort_args": ["-c", "model_reasoning_effort=\"{effort}\""],
                   "efforts": ["minimal", "low", "medium", "high", "xhigh"],
                   "models": [{"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"}, {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"},
@@ -58,21 +58,21 @@ DEFAULT_CFG = {
             "resume_args": ["--conversation", "{session}"],
             "pty": True,  # agy -p 在非终端环境下可能卡住，用伪终端运行
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-            "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit",
-            "model_flag": "--model", "default_label": "默认（自动选择）",
+            "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit", "hint_en": "Sign in with your Google account, then type /quit",
+            "model_flag": "--model", "default_label": "默认（自动选择）", "default_label_en": "Default (auto)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models_cmd": ["agy", "models"], "models": []},
         "grok": {"role": "judge",  # 评分模型，不参赛
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
                  "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
-                 "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号",
-                 "model_flag": "-m", "default_label": "默认",
+                 "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号", "hint_en": "A browser opens; sign in with your xAI / X account",
+                 "model_flag": "-m", "default_label": "默认", "default_label_en": "Default",
                  "models": [{"id": "grok-4.7", "label": "Grok 4.7"}, {"id": "grok-4.5", "label": "Grok 4.5"}]},
         "gemini": {"enabled": False,  # 个人账户自 2026-06-18 起停止服务；有付费 Gemini API key 可改为 true
                    "cmd": ["gemini", "-p", "{prompt}"], "parser": "raw", "color": "#4285f4",
                    "package": "@google/gemini-cli",
-                   "login": "gemini", "hint": "选 Login with Google 完成登录，然后输入 /quit",
-                   "model_flag": "-m", "default_label": "默认（Auto 自动路由）",
+                   "login": "gemini", "hint": "选 Login with Google 完成登录，然后输入 /quit", "hint_en": "Choose Login with Google, then type /quit",
+                   "model_flag": "-m", "default_label": "默认（Auto 自动路由）", "default_label_en": "Default (Auto routing)",
                    "models": [{"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro"},
                               {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro"},
                               {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash"},
@@ -80,6 +80,53 @@ DEFAULT_CFG = {
                               {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"}]},
     },
 }
+
+
+# ---------------- 界面语言（前端用 X-Arena-Lang 头传入 zh / en） ----------------
+MSG = {
+    "detect_timeout": ("（检测超时）", "(check timed out)"),
+    "node_use": ("使用已安装的 Node {ver}（{d}）\n", "Using installed Node {ver} ({d})\n"),
+    "node_none": ("没有找到 Node 20+（系统里{old}），这些 CLI 需要 Node 20+。\n下载独立的 Node 22 到 {dir}（不影响系统里的 Node）…\n",
+                  "No Node 20+ found (system has {old}); these CLIs need Node 20+.\nDownloading a private Node 22 to {dir} (your system Node is untouched)…\n"),
+    "node_old_is": ("是 {v}", "{v}"), "node_old_none": ("没有 Node", "no Node"),
+    "node_unsupported": ("当前系统不支持自动下载 Node，请手动安装 Node 20+", "Automatic Node download is not supported on this system. Install Node 20+ manually."),
+    "node_index_fail": ("获取 Node 版本列表失败：{e}", "Failed to fetch the Node version list: {e}"),
+    "node_dl": ("下载 {url}（约 50MB）…\n", "Downloading {url} (about 50 MB)…\n"),
+    "node_dl_fail": ("下载 Node 失败：{e}", "Failed to download Node: {e}"),
+    "node_ready": ("Node {ver} 就绪\n", "Node {ver} is ready\n"),
+    "no_install": ("这个工具没有配置安装方式", "This tool has no install method configured"),
+    "installing": ("已经在安装中", "Already installing"),
+    "install_ok": ("\n✅ 安装完成，下一步点「登录」完成一次性登录。\n", "\n✅ Installed. Next, click Sign in to finish the one-time sign-in.\n"),
+    "install_fail": ("\n安装失败，日志如上。\n", "\nInstall failed. See the log above.\n"),
+    "no_login": ("这个工具没有配置登录命令", "This tool has no sign-in command configured"),
+    "login_manual": ("请在终端运行：{cmd}", "Run this in Terminal: {cmd}"),
+    "login_title": ("▶ {tool} 登录：{hint}", "▶ {tool} sign-in: {hint}"),
+    "login_done": ("完成后可以关闭这个窗口，回到 AI Arena 点「重新检测」。", "When you are done, close this window and click Check again in AI Arena."),
+    "tag_think": ("[思考] ", "[reasoning] "), "tag_cmd": ("[命令] ", "[command] "), "tag_err": ("[错误] ", "[error] "),
+    "tag_usage": ("[用量] ", "[usage] "), "tag_step": ("[步骤] ", "[step] "), "tag_status": ("[状态] ", "[status] "),
+    "agy_raw": ("[原始输出] 没能从 agy 的输出里解析出回答，原始内容如下：\n", "[raw output] Could not parse an answer from agy's output. Raw output:\n"),
+    "resume_native": ("[续接] 沿用 {name} 自己的会话 {sid}…\n", "[resume] Continuing {name}'s own session {sid}…\n"),
+    "resume_transcript": ("[续接] 没有拿到上一轮的会话 ID，改为把之前 {n} 轮问答附在问题前面\n",
+                          "[resume] No session ID from the last round, so the previous {n} round(s) of Q&A were added before the question\n"),
+    "cmd_missing": ("找不到命令: {exe}\n已搜索的 PATH 见「环境」页。可在那里一键安装，或把完整路径写进 {cfg}。\n",
+                    "Command not found: {exe}\nSee the Setup page for the searched PATH. Install it there, or put the full path in {cfg}.\n"),
+    "judge_busy": ("已经在评分中", "Already scoring"), "judge_none": ("没有配置评分模型", "No scoring model configured"),
+    "judge_missing": ("没有找到 {exe}，请先在「环境」页安装 {label}", "{exe} not found. Install {label} on the Setup page first."),
+    "run_missing": ("这一轮不存在", "This round does not exist"),
+    "judge_two": ("至少要有两份成功的回答才能评分", "Scoring needs at least two successful answers"),
+    "judge_exit": ("{label} 退出码 {code}", "{label} exited with code {code}"),
+    "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
+    "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
+    "parent_missing": ("要追问的那一轮不存在", "The round you are following up on does not exist"),
+    "bad_token": ("token 无效，请刷新页面", "Invalid token. Reload the page."),
+    "no_judgment": ("还没有评分", "Not scored yet"), "empty_prompt": ("问题为空", "The question is empty"),
+    "no_dir": ("目录不存在: {d}", "Folder does not exist: {d}"),
+}
+
+
+def M(lang, key, **kw):
+    zh, en = MSG[key]
+    return (en if lang == "en" else zh).format(**kw)
 
 
 def load_cfg():
@@ -241,7 +288,7 @@ def which(exe):
 JOBS = {}  # 安装任务: tool -> {"running", "ok", "log"}
 
 
-def doctor():
+def doctor(lang="zh"):
     global PATH_CACHE
     PATH_CACHE = search_path()
     cfg, res = load_cfg(), {}
@@ -256,9 +303,10 @@ def doctor():
                 lines = (r.stdout.strip() or r.stderr.strip()).splitlines()
                 ver = lines[0][:80] if lines else ""
             except Exception:
-                ver = "（检测超时）"
+                ver = M(lang, "detect_timeout")
         res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""), "install": bool(spec.get("package") or spec.get("install_script")),
-                     "login": spec.get("login") or "", "hint": spec.get("hint") or ""}
+                     "login": spec.get("login") or "", "hint": spec.get("hint") or "",
+                     "hint_en": spec.get("hint_en") or spec.get("hint") or ""}
 
     names = enabled_tools(cfg) + ([judge_tool(cfg)] if judge_tool(cfg) else [])
     ths = [threading.Thread(target=check, args=(n, cfg["tools"][n])) for n in names]
@@ -285,7 +333,7 @@ def node_version(node):
         return 0, ""
 
 
-def ensure_node(log):
+def ensure_node(log, lang="zh"):
     """返回要用的 npm：优先已下载的独立 Node；系统 Node >= 20 就用系统的；否则下载 Node 22。"""
     if (NODE_DIR / "bin" / "npm").exists():
         return str(NODE_DIR / "bin" / "npm")
@@ -298,48 +346,47 @@ def ensure_node(log):
         if major >= 20:
             ARENA_HOME.mkdir(exist_ok=True)
             NODE_PIN.write_text(d)
-            log(f"使用已安装的 Node {ver}（{d}）\n")
+            log(M(lang, "node_use", ver=ver, d=d))
             return npm
         first_old = first_old or ver
-    log(f"没有找到 Node 20+（系统里{'是 ' + first_old if first_old else '没有 Node'}），这些 CLI 需要 Node 20+。\n"
-        f"下载独立的 Node 22 到 {NODE_DIR}（不影响系统里的 Node）…\n")
+    log(M(lang, "node_none", old=M(lang, "node_old_is", v=first_old) if first_old else M(lang, "node_old_none"), dir=NODE_DIR))
     with NODE_LOCK:
         if (NODE_DIR / "bin" / "npm").exists():
             return str(NODE_DIR / "bin" / "npm")
         plat = {"darwin": "darwin", "linux": "linux"}.get(sys.platform)
         if not plat:
-            raise RuntimeError("当前系统不支持自动下载 Node，请手动安装 Node 20+")
+            raise RuntimeError(M(lang, "node_unsupported"))
         arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
         r = subprocess.run(["curl", "-fsSL", "https://nodejs.org/dist/index.json"],
                            capture_output=True, text=True, timeout=60)
         if r.returncode:
-            raise RuntimeError("获取 Node 版本列表失败：" + r.stderr.strip())
+            raise RuntimeError(M(lang, "node_index_fail", e=r.stderr.strip()))
         ver = next(e["version"] for e in json.loads(r.stdout) if e["version"].startswith("v22."))
         name = f"node-{ver}-{plat}-{arch}"
         url = f"https://nodejs.org/dist/{ver}/{name}.tar.gz"
         ARENA_HOME.mkdir(exist_ok=True)
         tgz = ARENA_HOME / "node.tar.gz"
-        log(f"下载 {url}（约 50MB）…\n")
+        log(M(lang, "node_dl", url=url))
         r = subprocess.run(["curl", "-fL", "--silent", "--show-error", "-o", str(tgz), url],
                            capture_output=True, text=True, timeout=1200)
         if r.returncode:
-            raise RuntimeError("下载 Node 失败：" + r.stderr.strip())
+            raise RuntimeError(M(lang, "node_dl_fail", e=r.stderr.strip()))
         subprocess.run(["tar", "xzf", str(tgz), "-C", str(ARENA_HOME)], check=True, timeout=300)
         if NODE_DIR.exists():
             shutil.rmtree(NODE_DIR)
         (ARENA_HOME / name).rename(NODE_DIR)
         tgz.unlink()
-        log(f"Node {ver} 就绪\n")
+        log(M(lang, "node_ready", ver=ver))
     return str(NODE_DIR / "bin" / "npm")
 
 
-def start_install(tool):
+def start_install(tool, lang="zh"):
     spec = load_cfg()["tools"].get(tool) or {}
     pkg, script = spec.get("package"), spec.get("install_script")
     if not pkg and not script:
-        return "这个工具没有配置安装方式"
+        return M(lang, "no_install")
     if JOBS.get(tool, {}).get("running"):
-        return "已经在安装中"
+        return M(lang, "installing")
     job = JOBS[tool] = {"running": True, "ok": None, "log": ""}
 
     def log(t):
@@ -357,7 +404,7 @@ def start_install(tool):
                 p.wait()
                 job["ok"] = p.returncode == 0
                 raise StopIteration
-            npm = ensure_node(log)
+            npm = ensure_node(log, lang)
             PATH_CACHE = search_path()
             log(f"$ npm install -g --prefix ~/.ai-arena/npm-global {pkg}\n")
             env = child_env()
@@ -375,23 +422,25 @@ def start_install(tool):
             log(f"\n❌ {e}\n")
             job["ok"] = False
         PATH_CACHE = search_path()
-        log("\n✅ 安装完成，下一步点「登录」完成一次性登录。\n" if job["ok"] else "\n安装失败，日志如上。\n")
+        log(M(lang, "install_ok") if job["ok"] else M(lang, "install_fail"))
         job["running"] = False
 
     threading.Thread(target=work, daemon=True).start()
     return ""
 
 
-def open_login(tool):
+def open_login(tool, lang="zh"):
     spec = load_cfg()["tools"].get(tool) or {}
     cmd = spec.get("login")
     if not cmd:
-        return "这个工具没有配置登录命令"
+        return M(lang, "no_login")
     if sys.platform != "darwin":
-        return f"请在终端运行：{cmd}"
+        return M(lang, "login_manual", cmd=cmd)
     script = Path(tempfile.gettempdir()) / f"arena-login-{tool}.command"
-    script.write_text(f"#!/bin/bash\nexport PATH={shlex.quote(PATH_CACHE)}\necho '▶ {tool} 登录：{spec.get('hint', '')}'\n"
-                      f"echo\n{cmd}\necho\necho '完成后可以关闭这个窗口，回到 AI Arena 点「重新检测」。'\n", encoding="utf-8")
+    hint = (spec.get("hint_en") if lang == "en" else None) or spec.get("hint", "")
+    title, done = M(lang, "login_title", tool=tool, hint=hint), M(lang, "login_done")
+    script.write_text(f"#!/bin/bash\nexport PATH={shlex.quote(PATH_CACHE)}\necho {shlex.quote(title)}\n"
+                      f"echo\n{cmd}\necho\necho {shlex.quote(done)}\n", encoding="utf-8")
     script.chmod(0o755)
     subprocess.Popen(["/usr/bin/open", str(script)])  # .command 用「终端」打开，无需额外授权
     return ""
@@ -442,7 +491,7 @@ class Run:
         self.id, self.events, self.cond = rid, [], threading.Condition()
         self.pending, self.procs = set(tools), {}
         self.cancelled, self.finished_at = False, None
-        self.judge, self.judge_model = False, ""
+        self.judge, self.judge_model, self.lang = False, "", "zh"
 
     def emit(self, ev):
         with self.cond:
@@ -515,8 +564,8 @@ class ClaudeStream:
 
 
 class LineParser:
-    def __init__(self):
-        self.buf = ""
+    def __init__(self, lang="zh"):
+        self.buf, self.lang = "", lang
 
     def feed(self, chunk):
         self.buf += chunk
@@ -544,8 +593,8 @@ class LineParser:
 class CodexJson(LineParser):
     """解析 `codex exec --json` 的 JSONL（thread.started / item.* / turn.*）。"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, lang="zh"):
+        super().__init__(lang)
         self.sent, self.any_out = {}, False
 
     def event(self, o):
@@ -565,14 +614,14 @@ class CodexJson(LineParser):
                     return [("out", sep + delta)]
                 return []
             if t == "item.completed" and ty == "reasoning" and it.get("text"):
-                return [("log", "[思考] " + it["text"][:500] + "\n")]
+                return [("log", M(self.lang, "tag_think") + it["text"][:500] + "\n")]
             if t == "item.started" and ty == "command_execution":
-                return [("log", f"[命令] {it.get('command', '')}\n")]
+                return [("log", M(self.lang, "tag_cmd") + f"{it.get('command', '')}\n")]
             if ty == "error":
-                return [("log", f"[错误] {it.get('message', '')}\n")]
+                return [("log", M(self.lang, "tag_err") + f"{it.get('message', '')}\n")]
             return []
         if t == "turn.completed":
-            return [("log", f"[用量] {json.dumps(o.get('usage') or {}, ensure_ascii=False)}\n")]
+            return [("log", M(self.lang, "tag_usage") + f"{json.dumps(o.get('usage') or {}, ensure_ascii=False)}\n")]
         if t in ("turn.failed", "error"):
             return [("log", f"[{t}] {json.dumps(o.get('error') or o.get('message') or o, ensure_ascii=False)[:500]}\n")]
         return []
@@ -603,8 +652,8 @@ class AgyStream(LineParser):
     """解析 `agy -p … --output-format stream-json` 的 NDJSON（init / step_update / result）。
     字段位置按文档优先，找不到时在整条事件里递归查找；仍没解析出文字时，把原始输出写进过程日志。"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, lang="zh"):
+        super().__init__(lang)
         self.got, self.raw, self.out_any = False, [], False
 
     def _line(self, line):
@@ -620,7 +669,7 @@ class AgyStream(LineParser):
         if any(k == "out" and v for k, v in res):
             self.out_any = True
         if not self.out_any and self.raw:
-            res.append(("log", "[原始输出] 没能从 agy 的输出里解析出回答，原始内容如下：\n" + "\n".join(self.raw[:120]) + "\n"))
+            res.append(("log", M(self.lang, "agy_raw") + "\n".join(self.raw[:120]) + "\n"))
         return res
 
     def event(self, o):
@@ -642,7 +691,7 @@ class AgyStream(LineParser):
                 self.got = True
                 res.append(("out", delta))
             elif d.get("step_type") and d.get("status") == "DONE":
-                res.append(("log", f"[步骤] {d.get('step_type')}\n"))
+                res.append(("log", M(self.lang, "tag_step") + f"{d.get('step_type')}\n"))
         elif ev == "result":
             if not self.got:
                 resp = deep_find(o, ("response", "text", "content", "output", "answer", "message"))
@@ -650,24 +699,27 @@ class AgyStream(LineParser):
                     res.append(("out", resp))
             status = deep_find(o, ("status",))
             if status and status.upper() != "SUCCESS":
-                res.append(("log", f"[状态] {status} {deep_find(o, ('error',))}\n"))
+                res.append(("log", M(self.lang, "tag_status") + f"{status} {deep_find(o, ('error',))}\n"))
             usage = o.get("usage") or d.get("usage")
             if usage:
-                res.append(("log", f"[用量] {json.dumps(usage, ensure_ascii=False)}\n"))
+                res.append(("log", M(self.lang, "tag_usage") + f"{json.dumps(usage, ensure_ascii=False)}\n"))
         return res
 
 
-PARSERS = {"claude_stream": lambda: ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
+PARSERS = {"claude_stream": lambda lang="zh": ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
 
 
-def build_transcript(history, prompt):
-    parts = ["下面是我们之前的对话记录，请在此基础上回答最后的新问题。\n"]
+def build_transcript(history, prompt, lang="zh"):
+    en = lang == "en"
+    parts = ["Below is our conversation so far. Answer the new question at the end with it in mind.\n" if en
+             else "下面是我们之前的对话记录，请在此基础上回答最后的新问题。\n"]
     for i, (q_, a_) in enumerate(history, 1):
-        a_ = (a_ or "（没有回答）").strip()
+        a_ = (a_ or ("(no answer)" if en else "（没有回答）")).strip()
         if len(a_) > 6000:
-            a_ = a_[:6000] + "\n……（后面省略）"
-        parts.append(f"【第 {i} 轮 我的问题】\n{q_}\n\n【第 {i} 轮 你的回答】\n{a_}\n")
-    parts.append(f"【新问题】\n{prompt}")
+            a_ = a_[:6000] + ("\n…(truncated)" if en else "\n……（后面省略）")
+        parts.append(f"[Round {i}: my question]\n{q_}\n\n[Round {i}: your answer]\n{a_}\n" if en
+                     else f"【第 {i} 轮 我的问题】\n{q_}\n\n【第 {i} 轮 你的回答】\n{a_}\n")
+    parts.append(f"[New question]\n{prompt}" if en else f"【新问题】\n{prompt}")
     return "\n".join(parts)
 
 
@@ -701,11 +753,12 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if rargs and spec.get("resume_pos") == "prompt":  # 子命令形式，紧挨在问题前面
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
         base[i:i] = rargs
+    lang = getattr(run, "lang", "zh")
     if rargs:
-        note = f"[续接] 沿用 {name} 自己的会话 {session[:12]}…\n"
+        note = M(lang, "resume_native", name=name, sid=session[:12])
     elif history:
-        prompt = build_transcript(history, prompt)
-        note = f"[续接] 没有拿到上一轮的会话 ID，改为把之前 {len(history)} 轮问答附在问题前面\n"
+        prompt = build_transcript(history, prompt, lang)
+        note = M(lang, "resume_transcript", n=len(history))
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     shown = " ".join(shlex.quote(a) for a in base)
     out, log, t0, status = [], [], time.time(), "ok"
@@ -739,14 +792,13 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
                                  stdin=subprocess.DEVNULL, cwd=cwd, env=env, start_new_session=(os.name == "posix"))
     except FileNotFoundError:
         p, status = None, "未安装"
-        log.append(f"找不到命令: {cmd[0]}\n已搜索的 PATH 见「环境」页。可在那里一键安装，"
-                   f"或把完整路径写进 {CFG_PATH.name}。\n")
+        log.append(M(lang, "cmd_missing", exe=cmd[0], cfg=CFG_PATH.name))
     except Exception as e:
         p, status = None, "启动失败"
         log.append(f"{e}\n")
     if p:
         run.procs[name] = p
-        parser = PARSERS[spec["parser"]]() if spec.get("parser") in PARSERS else None
+        parser = PARSERS[spec["parser"]](lang) if spec.get("parser") in PARSERS else None
         ptx = PtyText() if use_pty else None
 
         def push(kind, text):
@@ -823,7 +875,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             run.finished_at = time.time()
             run.events.append({"type": "end"})
             if run.judge and not run.cancelled:  # 自动评分
-                threading.Thread(target=start_judge, args=(run.id, run.judge_model), daemon=True).start()
+                threading.Thread(target=start_judge, args=(run.id, run.judge_model, run.lang), daemon=True).start()
         run.cond.notify_all()
 
 
@@ -832,7 +884,9 @@ JUDGING = set()
 JUDGE_KEYS = ("accuracy", "completeness", "clarity", "usefulness")
 
 
-def build_judge_prompt(question, earlier, answers):
+def build_judge_prompt(question, earlier, answers, lang="zh"):
+    if lang == "en":
+        return build_judge_prompt_en(question, earlier, answers)
     lines = ["你是一位严格、公正的评审。下面是同一个问题的几份匿名回答，标为 A、B、C……，顺序是随机打乱的。",
              "请只根据内容评审，不要猜测或考虑它们来自哪个模型。不要使用任何工具，不要读写文件。", ""]
     if earlier:
@@ -856,6 +910,34 @@ def build_judge_prompt(question, earlier, answers):
               '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"一句中文点评"}},'
               '"best":"A","reason":"一两句中文，说明为什么选它"}',
               'scores 里要包含每一份回答。如果难分高下，best 填 "tie"。']
+    return "\n".join(lines)
+
+
+def build_judge_prompt_en(question, earlier, answers):
+    lines = ["You are a strict, fair reviewer. Below are several anonymous answers to the same question, labeled "
+             "Answer A, Answer B, Answer C…, in random order.",
+             "Judge on content only. Do not guess or consider which model wrote each one. Do not use any tools or read or write files.", ""]
+    if earlier:
+        lines.append("This is one round of a multi-turn conversation. Before this, the user asked, in order:")
+        lines += [f"{i}. {x}" for i, x in enumerate(earlier, 1)]
+        lines += ["(Each answerer can see its own earlier conversation.)", ""]
+    lines += ["[Question]", question, ""]
+    for lab, text in answers:
+        t = text.strip()
+        if len(t) > 12000:
+            t = t[:12000] + "\n…(truncated)"
+        lines += [f"[Answer {lab}]", t, ""]
+    lines += ["Scoring criteria (1 to 5 each, 5 is best):",
+              "- accuracy: are the facts correct, with no errors or fabrication",
+              "- completeness: does it cover the key aspects of the question",
+              "- clarity: is it well structured and easy to read",
+              "- usefulness: does it genuinely help the person who asked",
+              "- overall 1 to 5: your overall judgment, not a simple average",
+              "",
+              "Output only one JSON object and no other text. Format:",
+              '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"one-sentence comment in English"}},'
+              '"best":"A","reason":"one or two sentences in English on why it is best"}',
+              'Include every answer in scores. Refer to answers as "Answer A", "Answer B" and so on. If they are too close to call, set best to "tie".']
     return "\n".join(lines)
 
 
@@ -894,32 +976,32 @@ def judgment(rid):
     return j
 
 
-def start_judge(rid, model=""):
+def start_judge(rid, model="", lang="zh"):
     if rid in JUDGING:
-        return "已经在评分中"
+        return M(lang, "judge_busy")
     cfg = load_cfg()
     jn = judge_tool(cfg)
     if not jn:
-        return "没有配置评分模型"
+        return M(lang, "judge_none")
     spec = cfg["tools"][jn]
     label = spec.get("label") or jn
     exe = which(spec["cmd"][0])
     if not exe:
-        return f"没有找到 {spec['cmd'][0]}，请先在「环境」页安装 {label}"
+        return M(lang, "judge_missing", exe=spec['cmd'][0], label=label)
     run = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
     if not run:
-        return "这一轮不存在"
+        return M(lang, "run_missing")
     outs = [o for o in q("SELECT tool, output, status FROM outputs WHERE run_id=?", (rid,))
             if o["status"] == "ok" and (o["output"] or "").strip()]
     if len(outs) < 2:
-        return "至少要有两份成功的回答才能评分"
+        return M(lang, "judge_two")
     thread = run.get("thread") or rid
     earlier = [x["prompt"] for x in q("SELECT prompt FROM runs WHERE (id=? OR thread=?) AND created_at<? "
                                        "ORDER BY created_at", (thread, thread, run["created_at"]))]
     random.shuffle(outs)  # 打乱顺序并匿名，避免位置和品牌偏差
     labels = "ABCDEFGH"
     mapping = {labels[i]: o["tool"] for i, o in enumerate(outs)}
-    prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)])
+    prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)], lang)
     q("DELETE FROM judge_scores WHERE run_id=?", (rid,))
     q("INSERT OR REPLACE INTO judgments(run_id, judge, model, status, best, reason, mapping, result, raw, seconds, created_at) "
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, jn, model, "running", "", "", json.dumps(mapping), "{}", "", 0, time.time()))
@@ -941,11 +1023,11 @@ def start_judge(rid, model=""):
             raw = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr.strip() else "")
             o = parse_judge(r.stdout) if r.returncode == 0 else None
             if not o:
-                reason = f"{label} 退出码 {r.returncode}" if r.returncode else f"没能从 {label} 的回复里解析出评分"
+                reason = M(lang, "judge_exit", label=label, code=r.returncode) if r.returncode else M(lang, "judge_parse", label=label)
             else:
                 rows = []
                 for lab, tool in mapping.items():
-                    sc = o["scores"].get(lab) or o["scores"].get(f"回答 {lab}") or {}
+                    sc = o["scores"].get(lab) or o["scores"].get(f"回答 {lab}") or o["scores"].get(f"Answer {lab}") or {}
                     try:
                         overall = float(sc.get("overall"))
                     except (TypeError, ValueError):
@@ -953,12 +1035,12 @@ def start_judge(rid, model=""):
                     detail = {k: sc.get(k) for k in JUDGE_KEYS if sc.get(k) is not None}
                     rows.append((rid, tool, overall, json.dumps(detail), str(sc.get("comment") or "")))
                 b = str(o.get("best") or "").strip().upper()
-                best = "tie" if b in ("TIE", "平手") else mapping.get(b.replace("回答", "").strip(), "")
+                best = "tie" if b in ("TIE", "平手") else mapping.get(b.replace("回答", "").replace("ANSWER", "").strip(), "")
                 reason, result, status = str(o.get("reason") or ""), o, "ok"
                 for row in rows:
                     q("INSERT OR REPLACE INTO judge_scores(run_id, tool, overall, detail, comment) VALUES(?,?,?,?,?)", row)
         except subprocess.TimeoutExpired:
-            reason = f"{label} 超过 {cfg.get('judge_timeout', 300)} 秒没有回复"
+            reason = M(lang, "judge_timeout", label=label, sec=cfg.get('judge_timeout', 300))
         except Exception as e:
             reason = str(e)
         q("UPDATE judgments SET status=?, best=?, reason=?, result=?, raw=?, seconds=? WHERE run_id=?",
@@ -969,14 +1051,14 @@ def start_judge(rid, model=""):
     return ""
 
 
-def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model=""):
+def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh"):
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories = "", "", {}, {}
     if parent:  # 追问：沿用上一轮的工具、模型、effort、目录，并找各工具的会话 ID
         p = q("SELECT * FROM runs WHERE id=?", (parent,), one=True)
         if not p:
-            raise ValueError("要追问的那一轮不存在")
+            raise ValueError(M(lang, "parent_missing"))
         thread, parent_id = p.get("thread") or p["id"], p["id"]
         q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         tools = json.loads(p["tools"] or "[]")
@@ -1000,7 +1082,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
                                         json.dumps(models), json.dumps(efforts), thread or rid, parent_id))
     run = Run(rid, tools)
-    run.judge, run.judge_model = bool(judge), str(judge_model or "")
+    run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
     for t in tools:
         threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, cwd, cfg.get("timeout", 600),
@@ -1059,6 +1141,7 @@ class H(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}")
 
     def _guard(self, u):
+        self.lang = "en" if (self.headers.get("X-Arena-Lang") or "").lower().startswith("en") else "zh"
         if self.headers.get("Host") not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
             self._json({"error": "bad host"}, 403)  # 防 DNS rebinding
             return False
@@ -1066,7 +1149,7 @@ class H(BaseHTTPRequestHandler):
             return True
         tok = self.headers.get("X-Arena-Token") or parse_qs(u.query).get("token", [""])[0]
         if not secrets.compare_digest(tok, TOKEN):
-            self._json({"error": "token 无效，请刷新页面"}, 403)
+            self._json({"error": M(self.lang, "bad_token")}, 403)
             return False
         global LAST_SEEN
         LAST_SEEN = time.time()
@@ -1089,9 +1172,9 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif p.startswith("/api/judge/"):
             j = judgment(p.rsplit("/", 1)[1])
-            self._json(j) if j else self._json({"error": "还没有评分"}, 404)
+            self._json(j) if j else self._json({"error": M(self.lang, "no_judgment")}, 404)
         elif p == "/api/doctor":
-            self._json(doctor())
+            self._json(doctor(self.lang))
         elif p == "/api/jobs":
             self._json(JOBS)
         elif p == "/api/ping":
@@ -1102,6 +1185,7 @@ class H(BaseHTTPRequestHandler):
             self._json({"tools": {k: {"color": v.get("color", "#888"), "label": v.get("label") or k.capitalize(),
                                       "models": MODEL_CACHE.get(k) or v.get("models", []),
                                       "flag": bool(v.get("model_flag")), "default_label": v.get("default_label", "默认"),
+                                      "default_label_en": v.get("default_label_en") or "Default",
                                       "efforts": v.get("efforts", []) if v.get("effort_args") else []}
                                   for k, v in cfg["tools"].items()},
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
@@ -1152,22 +1236,22 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/run":
             prompt = (b.get("prompt") or "").strip()
             if not prompt:
-                return self._json({"error": "问题为空"}, 400)
+                return self._json({"error": M(self.lang, "empty_prompt")}, 400)
             jflag, jmodel = bool(b.get("judge")), str(b.get("judge_model") or "")
             if b.get("parent"):
                 try:
                     rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]),
-                                                            judge=jflag, judge_model=jmodel)
+                                                            judge=jflag, judge_model=jmodel, lang=self.lang)
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
                 return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"]})
             cwd = os.path.expanduser(b.get("cwd") or "").strip() or None
             if cwd and not os.path.isdir(cwd):
-                return self._json({"error": f"目录不存在: {cwd}"}, 400)
+                return self._json({"error": M(self.lang, "no_dir", d=cwd)}, 400)
             models = b.get("models") if isinstance(b.get("models"), dict) else {}
             efforts = b.get("efforts") if isinstance(b.get("efforts"), dict) else {}
             rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
-                                                    models, efforts, judge=jflag, judge_model=jmodel)
+                                                    models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang)
             self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "tag": b.get("tag") or ""})
         elif p.startswith("/api/cancel/"):
             run = RUNS.get(p.rsplit("/", 1)[1])
@@ -1178,13 +1262,13 @@ class H(BaseHTTPRequestHandler):
                         kill(pr)
             self._json({"ok": True})
         elif p.startswith("/api/judge/"):
-            err = start_judge(p.rsplit("/", 1)[1], str(b.get("model") or ""))
+            err = start_judge(p.rsplit("/", 1)[1], str(b.get("model") or ""), self.lang)
             self._json({"error": err}, 400) if err else self._json({"ok": True})
         elif p.startswith("/api/install/"):
-            err = start_install(p.rsplit("/", 1)[1])
+            err = start_install(p.rsplit("/", 1)[1], self.lang)
             self._json({"error": err}, 400) if err else self._json({"ok": True})
         elif p.startswith("/api/login/"):
-            err = open_login(p.rsplit("/", 1)[1])
+            err = open_login(p.rsplit("/", 1)[1], self.lang)
             self._json({"error": err}, 400) if err else self._json({"ok": True})
         elif p == "/api/shutdown":
             self._json({"ok": True})
@@ -1244,7 +1328,7 @@ class H(BaseHTTPRequestHandler):
             return
 
 
-PAGE = r"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
+PAGE = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Arena</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cdefs%3E%3ClinearGradient id=%22ag%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234C8DFF%22/%3E%3Cstop offset=%22.55%22 stop-color=%22%236D6AF7%22/%3E%3Cstop offset=%221%22 stop-color=%22%23A47CF2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2232%22 height=%2232%22 rx=%229%22 fill=%22url%28%23ag%29%22/%3E%3Crect x=%228%22 y=%2210%22 width=%224%22 height=%2214%22 rx=%222%22 fill=%22%23fff%22/%3E%3Crect x=%2214%22 y=%2215%22 width=%224%22 height=%229%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.88%22/%3E%3Crect x=%2220%22 y=%2212.5%22 width=%224%22 height=%2211.5%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.76%22/%3E%3Ccircle cx=%2224.6%22 cy=%227.4%22 r=%221.7%22 fill=%22%23fff%22/%3E%3C/svg%3E">
@@ -1302,6 +1386,9 @@ nav button{border:0;background:none;padding:6px 12px;border-radius:8px;color:var
 nav button:hover{color:var(--ink)}
 nav button.on{background:var(--solid);color:var(--ink);font-weight:600;box-shadow:0 0 0 1px var(--line),0 4px 12px -8px rgba(60,100,220,.45)}
 #conn{color:var(--bad);font-size:12.5px}
+.langsw{display:inline-flex;padding:2px;border-radius:9px;background:color-mix(in srgb,var(--soft) 80%,transparent);border:1px solid var(--line)}
+.langsw button{border:0;background:none;padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.langsw button.on{background:var(--solid);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(40,70,140,.15)}
 
 /* 通用按钮 */
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap}
@@ -1477,7 +1564,9 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 .grid th,.grid td{padding:11px 14px;border-top:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .grid th{border-top:0;color:var(--muted);font-weight:500;font-size:12.5px;background:var(--soft)}
 .grid th:first-child,.grid td:first-child{text-align:left}
-.grid td.tool{display:flex;align-items:center;gap:8px;font-weight:600}
+.grid td.tool{font-weight:600;white-space:nowrap}
+.grid td.tool .dot{display:inline-block;margin-right:8px;vertical-align:1px}
+.grid td.tool small{margin-left:6px}
 .grid td.tool small{font-weight:400;color:var(--muted)}
 .meter{display:inline-block;width:64px;height:6px;border-radius:3px;background:var(--soft);margin-left:8px;vertical-align:middle;overflow:hidden}
 .meter i{display:block;height:100%;background:var(--gold)}
@@ -1500,61 +1589,62 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 <header class="top"><div class="wrap">
   <div class="brand"><span class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="ag2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4C8DFF"/><stop offset=".55" stop-color="#6D6AF7"/><stop offset="1" stop-color="#A47CF2"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#ag2)"/><rect x="8" y="10" width="4" height="14" rx="2" fill="#fff"/><rect x="14" y="15" width="4" height="9" rx="2" fill="#fff" fill-opacity=".88"/><rect x="20" y="12.5" width="4" height="11.5" rx="2" fill="#fff" fill-opacity=".76"/><circle cx="24.6" cy="7.4" r="1.7" fill="#fff"/></svg></span><span class="word">AI Arena</span></div>
   <nav>
-    <button data-v="compare" class="on">对比</button><button data-v="history">历史</button>
-    <button data-v="stats">统计</button><button data-v="env">环境</button>
+    <button data-v="compare" class="on" data-i18n="nav.compare">对比</button><button data-v="history" data-i18n="nav.history">历史</button>
+    <button data-v="stats" data-i18n="nav.stats">统计</button><button data-v="env" data-i18n="nav.env">环境</button>
   </nav>
-  <span class="sp"></span><span id="conn" hidden>后台服务未连接，请重新打开 AI Arena</span>
-  <button class="btn sm ghost" id="quit" title="关闭后台服务">退出</button>
+  <span class="sp"></span><span id="conn" hidden data-i18n="conn">后台服务未连接，请重新打开 AI Arena</span>
+  <div class="langsw" role="group" aria-label="Language / 语言"><button data-l="zh" lang="zh-CN">中文</button><button data-l="en" lang="en">EN</button></div>
+  <button class="btn sm ghost" id="quit" title="关闭后台服务" data-i18n="quit" data-i18n-title="quit.title">退出</button>
 </div></header>
 
 <main class="wrap">
 <section id="v-compare">
   <div class="composer">
     <div class="cin">
-      <textarea id="prompt" rows="1" placeholder="问一个问题，选中的模型会同时作答"></textarea>
-      <button class="btn primary" id="go">发送</button>
+      <textarea id="prompt" rows="1" placeholder="问一个问题，选中的模型会同时作答" data-i18n-ph="prompt.ph"></textarea>
+      <button class="btn primary" id="go" data-i18n="send">发送</button>
     </div>
     <div class="lanes" id="lanes"></div>
     <div class="copts">
-      <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签"><datalist id="tagList"></datalist>
-      <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录">
+      <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
+      <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
       <span class="judgeopt" id="judgeOpt" hidden></span>
-      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> 发送</span>
+      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">发送</span></span>
     </div>
   </div>
-  <div class="feedhead"><h2>最近的对比</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll">全部折叠</button></div>
+  <div class="feedhead"><h2 data-i18n="recent">最近的对比</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll" data-i18n="collapseAll">全部折叠</button></div>
   <div id="feed"></div>
-  <p id="empty" hidden>还没有对比记录。在上面输入一个问题，选中的模型会同时作答。</p>
+  <p id="empty" hidden data-i18n="empty">还没有对比记录。在上面输入一个问题，选中的模型会同时作答。</p>
 </section>
 
 <section id="v-history" class="page" hidden>
-  <div class="bar"><input class="field" id="hq" placeholder="搜索问题" style="flex:1"><select class="field" id="htag"></select></div>
+  <div class="bar"><input class="field" id="hq" placeholder="搜索问题" style="flex:1" data-i18n-ph="hq.ph" data-i18n-aria="hq.ph"><select class="field" id="htag"></select></div>
   <ul class="list" id="hlist"></ul>
 </section>
 
 <section id="v-stats" class="page" hidden>
   <div class="bar"><select class="field" id="stag"></select>
-    <select class="field" id="sby"><option value="">按工具</option><option value="model">按工具、模型和 effort</option></select>
+    <select class="field" id="sby"><option value="" data-i18n="sby.tool">按工具</option><option value="model" data-i18n="sby.model">按工具、模型和 effort</option></select>
     <span id="stotal" class="note-s" style="margin:0"></span></div>
   <table class="grid" id="stable"></table>
   <div id="sjudge"></div>
-  <p class="note-s">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
+  <p class="note-s" data-i18n="stats.note">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
 </section>
 
 <section id="v-env" class="page" hidden>
-  <div class="bar"><button class="btn" id="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
+  <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
-  <details class="note-s"><summary>搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
-  <p class="note-s">没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。</p>
+  <details class="note-s"><summary data-i18n="env.path">搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
+  <p class="note-s" data-i18n="env.note">没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。</p>
 </section>
 </main>
 
-<div id="reader" hidden role="dialog" aria-modal="true" aria-label="阅读模式">
+<div id="reader" hidden role="dialog" aria-modal="true" aria-label="阅读模式" data-i18n-aria="reader">
   <div class="rp">
     <div class="rph"><div id="rtabs" style="display:flex;gap:2px;flex-wrap:wrap"></div><span class="sp"></span>
-      <span class="rhint">← → 切换  Esc 关闭</span>
-      <button class="ib" id="rraw" title="原文 / 排版"></button><button class="ib" id="rcopy" title="复制回答"></button><button class="ib" id="rclose" title="关闭"></button></div>
+      <span class="rhint" data-i18n="reader.hint">← → 切换  Esc 关闭</span>
+      <button class="ib" id="rraw" title="原文 / 排版" data-i18n-title="raw"></button><button class="ib" id="rcopy" title="复制回答" data-i18n-title="copyAns"></button><button class="ib" id="rclose" title="关闭" data-i18n-title="close"></button></div>
     <div id="rq"></div>
     <div id="rdoc" tabindex="0"></div>
   </div>
@@ -1573,42 +1663,127 @@ const svg=p=>`<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke
 const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>',
   copy:'<rect x="2.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M5.5 5.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>',
   code:'<path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/>',close:'<path d="M4 4l8 8M12 4l-8 8"/>'};
+/* ---------- 语言 ---------- */
+const I18N={zh:{
+ 'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
+ 'quit':'退出','quit.title':'关闭后台服务','prompt.ph':'问一个问题，选中的模型会同时作答','send':'发送','toSend':'发送',
+ 'tag':'标签','tag.ph':'标签，如 写作','cwd':'工作目录','cwd.ph':'工作目录（可选）','recent':'最近的对比','collapseAll':'全部折叠',
+ 'empty':'还没有对比记录。在上面输入一个问题，选中的模型会同时作答。','hq.ph':'搜索问题','sby.tool':'按工具','sby.model':'按工具、模型和 effort',
+ 'stats.note':'胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。',
+ 'recheck':'重新检测','env.path':'搜索过的 PATH','env.note':'没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。',
+ 'reader':'阅读模式','reader.hint':'← → 切换  Esc 关闭','raw':'原文 / 排版','copyAns':'复制回答','close':'关闭',
+ 'err.offline':'连不上后台服务，请重新打开 AI Arena','err.req':'请求失败 {0}','copyFail':'复制失败','default':'默认',
+ 'lane.on':'参加这轮对比','lane.modelAria':'{0} 使用的模型','lane.model':'模型','lane.noModel':'这个工具没有配置模型参数','lane.custom':'自定义模型 ID…',
+ 'lane.effAria':'{0} 的 effort','lane.effTitle':'Effort：模型思考的投入程度。越高越深入，也越慢、越耗额度','lane.effDefault':'Effort 默认',
+ 'lane.customPrompt':'输入 {0} 的模型 ID（会作为模型参数传给它的命令行）',
+ 'st.queued':'排队中','st.run':'生成中','st.ok':'完成','st.err':'出错 {0}',
+ 'tie':'平手','bestOf':'最佳 {0}','stop':'停止','rerun':'重跑','rerun.title':'把首个问题作为新对话再问一次',
+ 'fq.ph':'接着追问，各工具会沿用自己的上下文回答','fq':'追问','fgo':'追问','fhint':'沿用上一轮的工具、模型和 effort。',
+ 'rounds':'{0} 轮','roundN':'第 {0} 轮','loading':'正在载入…','allFull':'全部展开全文','allFold':'全部收起',
+ 'more':'展开全文','less':'收起','stars':'{0} 星','note.ph':'写点备注','note.aria':'{0} 的备注','best':'最佳','log':'过程日志','logEmpty':'（暂无）',
+ 'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
+ 'copy':'复制','copied':'已复制','m.actual':'实际使用：{0}','m.chosen':'（选择的是 {0}）','m.model':'模型：{0}','m.effort':'Effort：{0}','cost':'　约 ${0}',
+ 'j.autoTitle':'每轮回答完成后，自动把回答匿名交给 {0} 评分','j.auto':'{0} 自动评分','j.modelAria':'评分使用的模型',
+ 'j.ask':'让 {0} 评分','j.busy':'{0} 评分中…','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
+ 'j.fail':'评分失败：{0}','j.unknown':'未知原因','j.none':'未选出','j.agree':'和你的选择一致','j.best':'{0} 认为最佳：','j.sep':'。',
+ 'k.accuracy':'准确','k.completeness':'完整','k.clarity':'清晰','k.usefulness':'实用',
+ 't.busy':'上一轮还在生成，等它结束再追问','t.pickTool':'至少选中一个工具',
+ 'h.unrated':'未评分','h.open':'打开','h.del':'删除','h.none':'没有找到记录','h.confirm':'删除这条对话（包括所有追问）？',
+ 's.total':'共 {0} 轮，已评判 {1} 轮','s.tool':'工具','s.n':'参加','s.ok':'成功率','s.avg':'平均分','s.rated':'打分数','s.best':'最佳','s.win':'胜率','s.secs':'平均耗时','s.chars':'平均字数','s.none':'还没有数据',
+ 'sj.title':'{0} 评分','sj.empty':'还没有 {0} 的评分。在输入区勾选「{0} 自动评分」，或在任意一轮下面点「让 {0} 评分」。',
+ 'sj.agree':'你和 {0} 选的最佳一致：{1} / {2}（{3}%）','sj.agreeEmpty':'你和它都选过最佳的轮次越多，一致率越有参考价值',
+ 'sj.avg':'{0} 平均分','sj.n':'评过的回答','sj.best':'{0} 选为最佳',
+ 'e.checking':'正在检测，需要几秒…','e.node':'Node {0}。','e.noNode':'没检测到 Node.js。','e.where':'一键安装会装到 ~/.ai-arena，不需要管理员权限。',
+ 'e.tool':'工具','e.status':'状态','e.ver':'版本','e.path':'位置','e.act':'操作','e.login':'登录','e.installing':'安装中…','e.install':'一键安装','e.judge':'评分',
+ 'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
+ 'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
+ 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。'
+},en:{
+ 'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
+ 'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
+ 'tag':'Tag','tag.ph':'Tag, e.g. writing','cwd':'Working folder','cwd.ph':'Working folder (optional)','recent':'Recent comparisons','collapseAll':'Collapse all',
+ 'empty':'No comparisons yet. Ask a question above and the selected models will answer side by side.','hq.ph':'Search questions','sby.tool':'By tool','sby.model':'By tool, model and effort',
+ 'stats.note':'Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.',
+ 'recheck':'Check again','env.path':'Searched PATH','env.note':'For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.',
+ 'reader':'Reader','reader.hint':'← → switch   Esc close','raw':'Raw / formatted','copyAns':'Copy answer','close':'Close',
+ 'err.offline':'Cannot reach the background service. Reopen AI Arena.','err.req':'Request failed {0}','copyFail':'Copy failed','default':'Default',
+ 'lane.on':'Include in this round','lane.modelAria':'{0} model','lane.model':'Model','lane.noModel':'This tool has no model option configured','lane.custom':'Custom model ID…',
+ 'lane.effAria':'{0} effort','lane.effTitle':'Effort: how hard the model thinks. Higher goes deeper but is slower and uses more quota','lane.effDefault':'Effort default',
+ 'lane.customPrompt':'Enter a model ID for {0} (passed to its CLI as the model option)',
+ 'st.queued':'Queued','st.run':'Generating','st.ok':'Done','st.err':'Error {0}',
+ 'tie':'Tie','bestOf':'Best: {0}','stop':'Stop','rerun':'Rerun','rerun.title':'Ask the first question again as a new conversation',
+ 'fq.ph':'Ask a follow-up. Each tool continues its own conversation','fq':'Follow-up','fgo':'Follow up','fhint':'Uses the same tools, models and effort as the last round.',
+ 'rounds':'{0} rounds','roundN':'Round {0}','loading':'Loading…','allFull':'Expand all','allFold':'Collapse all',
+ 'more':'Show full answer','less':'Show less','stars':'{0} stars','note.ph':'Add a note','note.aria':'Note for {0}','best':'Best','log':'Process log','logEmpty':'(empty)',
+ 'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
+ 'copy':'Copy','copied':'Copied','m.actual':'Actual model: {0}','m.chosen':' (selected: {0})','m.model':'Model: {0}','m.effort':'Effort: {0}','cost':'   ≈ ${0}',
+ 'j.autoTitle':'After each round, send the answers anonymously to {0} for scoring','j.auto':'{0} auto-score','j.modelAria':'Scoring model',
+ 'j.ask':'Ask {0} to score','j.busy':'{0} is scoring…','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
+ 'j.fail':'Scoring failed: {0}','j.unknown':'unknown reason','j.none':'none','j.agree':'matches your pick','j.best':'{0} picks as best: ','j.sep':'. ',
+ 'k.accuracy':'Accuracy','k.completeness':'Completeness','k.clarity':'Clarity','k.usefulness':'Usefulness',
+ 't.busy':'The last round is still running. Wait for it to finish before following up.','t.pickTool':'Select at least one tool',
+ 'h.unrated':'Not rated','h.open':'Open','h.del':'Delete','h.none':'No matching conversations','h.confirm':'Delete this conversation, including all follow-ups?',
+ 's.total':'{0} rounds, {1} judged','s.tool':'Tool','s.n':'Rounds','s.ok':'Success','s.avg':'Avg score','s.rated':'Rated','s.best':'Best','s.win':'Win rate','s.secs':'Avg time','s.chars':'Avg length','s.none':'No data yet',
+ 'sj.title':'{0} scores','sj.empty':'No {0} scores yet. Turn on "{0} auto-score" in the composer, or click "Ask {0} to score" under any round.',
+ 'sj.agree':'Your pick matched {0}: {1} / {2} ({3}%)','sj.agreeEmpty':'The more rounds you both pick a best for, the more meaningful the match rate',
+ 'sj.avg':'{0} avg score','sj.n':'Answers scored','sj.best':'Picked best by {0}',
+ 'e.checking':'Checking, this takes a few seconds…','e.node':'Node {0}. ','e.noNode':'Node.js not found. ','e.where':'Install puts tools in ~/.ai-arena and needs no admin rights.',
+ 'e.tool':'Tool','e.status':'Status','e.ver':'Version','e.path':'Location','e.act':'Action','e.login':'Sign in','e.installing':'Installing…','e.install':'Install','e.judge':'judge',
+ 'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
+ 'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
+ 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.'
+}};
+const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
+let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
+const T=(k,...a)=>String((I18N[LANG]&&I18N[LANG][k])??I18N.zh[k]??k).replace(/\{(\d)\}/g,(m,i)=>a[+i]??'');
+const statusText=s=>LANG==='en'?(STATUS_EN[s]||s):s;
+function applyI18n(){
+  document.documentElement.lang=LANG==='en'?'en':'zh-CN';
+  $$('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));
+  $$('[data-i18n-ph]').forEach(e=>e.placeholder=T(e.dataset.i18nPh));
+  $$('[data-i18n-title]').forEach(e=>e.title=T(e.dataset.i18nTitle));
+  $$('[data-i18n-aria]').forEach(e=>e.setAttribute('aria-label',T(e.dataset.i18nAria)));
+  $$('.langsw button').forEach(b=>{b.classList.toggle('on',b.dataset.l===LANG);b.setAttribute('aria-pressed',b.dataset.l===LANG)});
+}
+$$('.langsw button').forEach(b=>b.onclick=()=>{if(b.dataset.l===LANG)return;try{localStorage.setItem('arenaLang',b.dataset.l)}catch(e){}location.reload()});
 function md(t){t=clean(t);return (window.marked&&window.DOMPurify)?DOMPurify.sanitize(marked.parse(t)):'<pre class="rawtxt">'+esc(t)+'</pre>'}
 const ls={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 function toast(m){const el=$('#toast');el.textContent=String(m);el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,3500)}
 function offline(on){$('#conn').hidden=on;$('#go').disabled=!on}
-function api(path,opt={}){return fetch(path,{...opt,headers:{'Content-Type':'application/json','X-Arena-Token':TOKEN}})
-  .catch(()=>{offline(false);throw '连不上后台服务，请重新打开 AI Arena'})
-  .then(async r=>{offline(true);const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||('请求失败 '+r.status);return j})}
+function api(path,opt={}){return fetch(path,{...opt,headers:{'Content-Type':'application/json','X-Arena-Token':TOKEN,'X-Arena-Lang':LANG}})
+  .catch(()=>{offline(false);throw T('err.offline')})
+  .then(async r=>{offline(true);const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||T('err.req',r.status);return j})}
 const post=(p,b={})=>api(p,{method:'POST',body:JSON.stringify(b)});
-function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),hm=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
-  return d.toDateString()===n.toDateString()?hm:`${d.getMonth()+1}月${d.getDate()}日 ${hm}`}
+function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),hm=d.toLocaleTimeString(LANG==='en'?'en-GB':'zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  if(d.toDateString()===n.toDateString())return hm;
+  return LANG==='en'?`${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${hm}`:`${d.getMonth()+1}月${d.getDate()}日 ${hm}`}
 function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.textContent=t;setTimeout(()=>{b.innerHTML=o;delete b.dataset.f},1100)}
-function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast('复制失败'))}
+function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
 /* ---------- 配置与模型选择 ---------- */
 let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={};
 const color=t=>CFG.tools[t]?.color||'#8893a3';
 const EFF_ZH={minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'很高',max:'最高'};
-const effLabel=e=>e?`${e} ${EFF_ZH[e]||''}`.trim():'';
-function modelLabel(t,id){if(!id)return CFG.tools[t]?.default_label||'默认';const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
+const effLabel=e=>e?(LANG==='en'?e:`${e} ${EFF_ZH[e]||''}`.trim()):'';
+const dlabel=t=>{const v=CFG.tools[t]||{};return (LANG==='en'?v.default_label_en:v.default_label)||T('default')};
+function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 function renderLanes(){
   $('#lanes').style.gridTemplateColumns=`repeat(${CFG.order.length},minmax(0,1fr))`;
   $('#lanes').innerHTML=CFG.order.map(t=>{const v=CFG.tools[t],sel=SEL[t];
-    const opts=[{id:'',label:v.default_label||'默认'},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
+    const opts=[{id:'',label:dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
-      <button class="lsw" role="switch" aria-checked="${sel.on}" title="参加这轮对比"><span class="box"></span>${esc(tname(t))}</button>
-      <select class="mdl${sel.model?' set':''}" aria-label="${esc(tname(t))} 使用的模型" title="模型" ${v.flag?'':'disabled title="这个工具没有配置模型参数"'}>
+      <button class="lsw" role="switch" aria-checked="${sel.on}" title="${esc(T('lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
+      <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag?'':`disabled title="${esc(T('lane.noModel'))}"`}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
-        ${v.flag?'<option value="__custom">自定义模型 ID…</option>':''}</select>
-      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(tname(t))} 的 effort" title="Effort：模型思考的投入程度。越高越深入，也越慢、越耗额度">
-        <option value="">Effort 默认</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(EFF_ZH[e]||'')}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
+        ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
+      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}">
+        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(LANG==='en'?e:(EFF_ZH[e]||''))}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
   SEL[t].on=!SEL[t].on;ls.set('arenaSel',SEL);renderLanes()});
 $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(!s)return;const t=s.closest('.lane').dataset.t;
   if(s.classList.contains('eff')){SEL[t].effort=s.value;ls.set('arenaSel',SEL);renderLanes();return}
-  if(s.value==='__custom'){const id=(prompt(`输入 ${tname(t)} 的模型 ID（会作为模型参数传给它的命令行）`)||'').trim();
+  if(s.value==='__custom'){const id=(prompt(T('lane.customPrompt',tname(t)))||'').trim();
     if(id){CUSTOM[t]=[...new Set([...(CUSTOM[t]||[]),id])];ls.set('arenaCustom',CUSTOM);SEL[t].model=id}}
   else SEL[t].model=s.value;
   ls.set('arenaSel',SEL);renderLanes()});
@@ -1617,11 +1792,11 @@ $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(
 // 一张卡片 = 一个对话线程（th）；线程里每次提问 = 一轮（r），每轮单独打分、计入统计
 const ROUNDS=new Map(),TURNS=new Map(),feed=$('#feed');
 const segCls=st=>!st?'':st==='run'?'run':st==='ok'?'ok':'bad';
-function stateOf(s){if(!s.status)return['排队中',''];if(s.status==='run')return['生成中','run'];if(s.status==='ok')return['完成','ok'];
-  if(/^exit /.test(s.status))return['出错 '+s.status.slice(5),'bad'];return[s.status,'bad']}
+function stateOf(s){if(!s.status)return[T('st.queued'),''];if(s.status==='run')return[T('st.run'),'run'];if(s.status==='ok')return[T('st.ok'),'ok'];
+  if(/^exit /.test(s.status))return[T('st.err',s.status.slice(5)),'bad'];return[statusText(s.status),'bad']}
 const modelText=(r,t)=>{const s=r.S[t];return s&&s.actual?s.actual:modelLabel(t,(s&&s.model)||r.models[t]||'')};
 const lastTurn=th=>th.turns[th.turns.length-1];
-const winText=w=>w==='tie'?'平手':'最佳 '+esc(tname(w));
+const winText=w=>w==='tie'?T('tie'):esc(T('bestOf',tname(w)));
 
 function makeRound(meta){
   const th={id:meta.id,meta,tools:meta.tools||[],turns:[],built:false,open:false};
@@ -1631,16 +1806,16 @@ function makeRound(meta){
     <span class="chev">${svg(I.chev)}</span><span class="rq"></span>
     <span class="lanebar" aria-hidden="true">${th.tools.map(t=>`<i data-t="${esc(t)}" style="--c:${esc(color(t))}"></i>`).join('')}</span>
     <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="tagc"></span><time></time></span>
-    <span class="ract"><button class="btn sm stop" hidden>停止</button><button class="btn sm ghost rerun" title="把首个问题作为新对话再问一次">重跑</button></span>
+    <span class="ract"><button class="btn sm stop" hidden>${T('stop')}</button><button class="btn sm ghost rerun" title="${esc(T('rerun.title'))}">${T('rerun')}</button></span>
   </header>
   <div class="rbody" hidden><div class="turns"></div>
-    <div class="follow"><textarea class="fq" rows="1" placeholder="接着追问，各工具会沿用自己的上下文回答" aria-label="追问"></textarea><button class="btn primary fgo">追问</button></div>
-    <p class="fhint">沿用上一轮的工具、模型和 effort。<kbd>⌘</kbd> <kbd>Enter</kbd> 发送</p></div>`;
+    <div class="follow"><textarea class="fq" rows="1" placeholder="${esc(T('fq.ph'))}" aria-label="${esc(T('fq'))}"></textarea><button class="btn primary fgo">${T('fgo')}</button></div>
+    <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
   (meta.st||'').split('|').filter(Boolean).forEach(x=>{const i=x.indexOf(':'),seg=$(`.lanebar i[data-t="${CSS.escape(x.slice(0,i))}"]`,el);if(seg)seg.className=segCls(x.slice(i+1))});
   const w=meta.last_winner??meta.winner;if(w)$('.winc',el).innerHTML=`<span class="chip win">${winText(w)}</span>`;
-  if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${meta.nturns} 轮</span>`;
+  if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${T('rounds',meta.nturns)}</span>`;
   const rh=$('.rh',el);
   rh.onclick=e=>{if(!e.target.closest('button'))setOpen(th,!th.open)};
   rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(th,!th.open)}};
@@ -1655,7 +1830,7 @@ function makeRound(meta){
 function setOpen(th,open){th.open=open;th.el.classList.toggle('open',open);$('.rbody',th.el).hidden=!open;$('.rh',th.el).setAttribute('aria-expanded',open);
   if(open&&!th.built)buildThread(th)}
 async function buildThread(th){
-  th.built=true;const box=$('.turns',th.el);box.innerHTML='<p class="ph">正在载入…</p>';
+  th.built=true;const box=$('.turns',th.el);box.innerHTML=`<p class="ph">${T('loading')}</p>`;
   try{const d=await api('/api/run/'+encodeURIComponent(th.id));box.innerHTML='';th.meta.cwd=d.cwd;
     (d.turns&&d.turns.length?d.turns:[d]).forEach((t,i)=>fillTurn(makeTurn(th,norm(t),i),t));
     foldOld(th);paintHead(th)}
@@ -1665,15 +1840,15 @@ function makeTurn(th,meta,idx){
   const r={id:meta.id,meta,th,idx,tools:meta.tools||[],models:meta.models||{},efforts:meta.efforts||{},S:{},winner:meta.winner||'',es:null,allFull:false,running:false,folded:false};
   TURNS.set(r.id,r);th.turns.push(r);
   const el=r.el=document.createElement('section');el.className='turn';
-  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">第 ${idx+1} 轮</span><span class="tq"></span><span class="tsum"></span></div>
+  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span><span class="tsum"></span></div>
     <div class="tbody"><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
-    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button>${CFG.judge?`<button class="btn sm ghost jbtn">让 ${esc(tname(CFG.judge))} 评分</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
+    <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
   if(CFG.judge)$('.jbtn',el).onclick=()=>askJudge(r);
   const h2=$('.th2',el);h2.onclick=()=>fold(r,!r.folded);
   h2.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fold(r,!r.folded)}};
   $('.tie',el).onclick=()=>setWinner(r,r.winner==='tie'?'':'tie');
-  $('.allfull',el).onclick=e=>{r.allFull=!r.allFull;e.target.textContent=r.allFull?'全部收起':'全部展开全文';r.tools.forEach(t=>{r.S[t].full=r.allFull;paint(r,t)})};
+  $('.allfull',el).onclick=e=>{r.allFull=!r.allFull;e.target.textContent=r.allFull?T('allFold'):T('allFull');r.tools.forEach(t=>{r.S[t].full=r.allFull;paint(r,t)})};
   $('.turns',th.el).appendChild(el);
   for(const t of r.tools){r.S[t]={out:'',log:'',status:'',secs:null,t0:null,raw:false,score:0,note:'',model:r.models[t]||'',effort:r.efforts[t]||'',actual:'',full:false};makeCol(r,t,$('.cols',el))}
   paintWinner(r);return r;
@@ -1694,7 +1869,7 @@ function foldOld(th){th.turns.forEach((r,i)=>fold(r,i<th.turns.length-1))}
 function paintHead(th){
   const last=lastTurn(th),el=th.el;if(!last)return;
   el.classList.toggle('multi',th.turns.length>1);
-  $('.nturn',el).innerHTML=th.turns.length>1?`<span class="chip">${th.turns.length} 轮</span>`:'';
+  $('.nturn',el).innerHTML=th.turns.length>1?`<span class="chip">${T('rounds',th.turns.length)}</span>`:'';
   for(const t of th.tools){const seg=$(`.lanebar i[data-t="${CSS.escape(t)}"]`,el);if(seg)seg.className=segCls(last.S[t]?.status)}
   $('.winc',el).innerHTML=last.winner?`<span class="chip win">${winText(last.winner)}</span>`:'';
   const busy=th.turns.some(r=>r.running);
@@ -1704,12 +1879,12 @@ function makeCol(r,t,parent){
   const s=r.S[t],c=s.el=document.createElement('section');c.className='col';c.style.setProperty('--c',color(t));
   c.innerHTML=`<header class="ch"><span class="dot"></span><b>${esc(tname(t))}</b><span class="mchip"></span><span class="sp"></span>
     <span class="state"></span><span class="tm"></span>
-    <button class="ib raw" title="原文 / 排版" aria-pressed="false">${svg(I.code)}</button><button class="ib cp" title="复制回答">${svg(I.copy)}</button><button class="ib ex" title="阅读模式">${svg(I.expand)}</button></header>
-  <div class="body" tabindex="0"></div><button class="more">展开全文</button>
-  <div class="cf"><span class="stars">${[1,2,3,4,5].map(i=>`<button class="star" data-v="${i}" aria-label="${i} 星">★</button>`).join('')}</span>
-    <input class="note" placeholder="写点备注" aria-label="${esc(tname(t))} 的备注"><button class="btn sm ghost win">最佳</button></div>
+    <button class="ib raw" title="${esc(T('raw'))}" aria-pressed="false">${svg(I.code)}</button><button class="ib cp" title="${esc(T('copyAns'))}">${svg(I.copy)}</button><button class="ib ex" title="${esc(T('reader'))}">${svg(I.expand)}</button></header>
+  <div class="body" tabindex="0"></div><button class="more">${T('more')}</button>
+  <div class="cf"><span class="stars">${[1,2,3,4,5].map(i=>`<button class="star" data-v="${i}" aria-label="${esc(T('stars',i))}">★</button>`).join('')}</span>
+    <input class="note" placeholder="${esc(T('note.ph'))}" aria-label="${esc(T('note.aria',tname(t)))}"><button class="btn sm ghost win">${T('best')}</button></div>
   <div class="jd" hidden></div>
-  <details class="log"><summary>过程日志<span class="cost"></span></summary><pre></pre></details>`;
+  <details class="log"><summary>${T('log')}<span class="cost"></span></summary><pre></pre></details>`;
   $('.raw',c).onclick=()=>{s.raw=!s.raw;paint(r,t)};
   $('.cp',c).onclick=e=>copyText(clean(s.out),e.currentTarget);
   $('.ex',c).onclick=()=>openReader(r,t);
@@ -1721,13 +1896,13 @@ function makeCol(r,t,parent){
 }
 function content(s){
   if(s.out)return s.raw?`<pre class="rawtxt">${esc(clean(s.out))}</pre>`:`<div class="md">${md(s.out)}</div>`;
-  if(s.status==='未安装')return `<p class="ph">没有找到这个工具。<a href="#" data-go="env">到「环境」页安装</a></p>`;
-  if(s.status==='run')return `<p class="ph thinking">正在思考</p>`;
-  if(s.status)return `<p class="ph">没有输出，原因见下方「过程日志」。</p>`;
-  return `<p class="ph">排队中</p>`;
+  if(s.status==='未安装')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
+  if(s.status==='run')return `<p class="ph thinking">${T('c.thinking')}</p>`;
+  if(s.status)return `<p class="ph">${T('c.noOut')}</p>`;
+  return `<p class="ph">${T('st.queued')}</p>`;
 }
 function decorate(root){$$('.md pre',root).forEach(p=>{const txt=(p.querySelector('code')||p).textContent,b=document.createElement('button');
-  b.className='pcopy';b.textContent='复制';b.onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(txt);b.textContent='已复制';setTimeout(()=>b.textContent='复制',1100)};p.appendChild(b)})}
+  b.className='pcopy';b.textContent=T('copy');b.onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(txt);b.textContent=T('copied');setTimeout(()=>b.textContent=T('copy'),1100)};p.appendChild(b)})}
 const dirty=new Map();let raf=0;
 function paint(r,t){dirty.set(r.id+'|'+t,[r,t]);if(!raf)raf=requestAnimationFrame(()=>{raf=0;for(const [a,b] of dirty.values())render(a,b);dirty.clear()})}
 function render(r,t){
@@ -1737,13 +1912,13 @@ function render(r,t){
   c.classList.toggle('full',s.full);
   if(s.status==='run'&&atBottom&&!s.full)body.scrollTop=body.scrollHeight;
   c.classList.toggle('overflow',s.full||body.scrollHeight>body.clientHeight+8);
-  $('.more',c).textContent=s.full?'收起':'展开全文';
-  $('.log pre',c).textContent=clean(s.log)||'（暂无）';
+  $('.more',c).textContent=s.full?T('less'):T('more');
+  $('.log pre',c).textContent=clean(s.log)||T('logEmpty');
   const [lab,cls]=stateOf(s),st=$('.state',c);st.textContent=lab;st.className='state '+cls;
   const mc=$('.mchip',c);mc.textContent=modelText(r,t)+(s.effort?' / '+s.effort:'');
-  mc.title=(s.actual?`实际使用：${s.actual}${s.model?'（选择的是 '+modelLabel(t,s.model)+'）':''}`:'模型：'+modelLabel(t,s.model))
-    +(s.effort?`\nEffort：${effLabel(s.effort)}`:'');
-  const cost=(s.log.match(/cost=\$([\d.]+)/)||[])[1];$('.cost',c).textContent=cost?`　约 $${(+cost).toFixed(3)}`:'';
+  mc.title=(s.actual?T('m.actual',s.actual)+(s.model?T('m.chosen',modelLabel(t,s.model)):''):T('m.model',modelLabel(t,s.model)))
+    +(s.effort?'\n'+T('m.effort',effLabel(s.effort)):'');
+  const cost=(s.log.match(/cost=\$([\d.]+)/)||[])[1];$('.cost',c).textContent=cost?T('cost',(+cost).toFixed(3)):'';
   $('.raw',c).setAttribute('aria-pressed',s.raw);
   if(r===lastTurn(r.th))paintHead(r.th);
   if(READER.r===r&&READER.t===t)renderReader(false);
@@ -1776,10 +1951,10 @@ function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)ren
 let JSEL={model:'',auto:false};
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
-  const v=CFG.tools[CFG.judge],opts=[{id:'',label:v.default_label||'默认'},...(v.models||[])];
+  const v=CFG.tools[CFG.judge],opts=[{id:'',label:dlabel(CFG.judge)},...(v.models||[])];
   box.hidden=false;
-  box.innerHTML=`<label title="每轮回答完成后，自动把三份回答匿名交给 ${esc(tname(CFG.judge))} 评分"><input type="checkbox" id="jauto" ${JSEL.auto?'checked':''}>${esc(tname(CFG.judge))} 自动评分</label>
-    <select id="jmodel" aria-label="评分使用的模型">${opts.map(o=>`<option value="${esc(o.id)}"${o.id===JSEL.model?' selected':''}>${esc(o.label)}</option>`).join('')}</select>`;
+  box.innerHTML=`<label title="${esc(T('j.autoTitle',tname(CFG.judge)))}"><input type="checkbox" id="jauto" ${JSEL.auto?'checked':''}>${esc(T('j.auto',tname(CFG.judge)))}</label>
+    <select id="jmodel" aria-label="${esc(T('j.modelAria'))}">${opts.map(o=>`<option value="${esc(o.id)}"${o.id===JSEL.model?' selected':''}>${esc(o.label)}</option>`).join('')}</select>`;
   $('#jauto').onchange=e=>{JSEL.auto=e.target.checked;ls.set('arenaJudge',JSEL)};
   $('#jmodel').onchange=e=>{JSEL.model=e.target.value;ls.set('arenaJudge',JSEL)};
 }
@@ -1797,24 +1972,24 @@ function pollJudge(r,waitStart){
 }
 function deanon(t,map){  // 把 Grok 点评里的匿名标签（回答 A、A 比 C）换回工具名
   const nm=l=>map&&map[l]?tname(map[l]):null;
-  return String(t||'').replace(/回答\s*([A-H])/g,(m,l)=>nm(l)||m)
+  return String(t||'').replace(/(?:回答|Answer|Response)\s*([A-H])\b/g,(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
 }
 function renderJudge(r,j){
   r.judge=j;const name=esc(tname(CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
   const busy=j.running||j.status==='running';
-  b.disabled=busy;b.textContent=busy?`${tname(CFG.judge)} 评分中…`:j.status==='ok'?'重新评分':j.status?'重试评分':`让 ${tname(CFG.judge)} 评分`;
+  b.disabled=busy;b.textContent=busy?T('j.busy',tname(CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
   res.classList.toggle('err',j.status==='error');res.title='';
   for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
-  if(busy){res.innerHTML='匿名打乱后交给 '+name+' 评审中…';return}
-  if(j.status==='error'){res.textContent=`评分失败：${j.reason||'未知原因'}`;res.title=(j.raw||'').slice(-2000);return}
+  if(busy){res.textContent=T('j.sending',tname(CFG.judge||'grok'));return}
+  if(j.status==='error'){res.textContent=T('j.fail',j.reason||T('j.unknown'));res.title=(j.raw||'').slice(-2000);return}
   if(j.status!=='ok'){res.textContent='';return}
   for(const x of j.scores||[]){const s=r.S[x.tool];if(!s)continue;const jd=$('.jd',s.el);jd.hidden=false;
-    const det=Object.entries(x.detail||{}).map(([k,v])=>({accuracy:'准确',completeness:'完整',clarity:'清晰',usefulness:'实用'}[k]||k)+' '+v).join('  ');
+    const det=Object.entries(x.detail||{}).map(([k,v])=>(T('k.'+k)||k)+' '+v).join('  ');
     jd.innerHTML=`<b>${name} ${x.overall!=null?x.overall:'—'}/5</b>${esc(deanon(x.comment,j.mapping))}${det?`<span class="jx">${esc(det)}</span>`:''}`}
-  const best=j.best==='tie'?'平手':j.best?tname(j.best):'未选出';
-  const agree=r.winner&&j.best?(r.winner===j.best?'<span class="agree">和你的选择一致</span>':''):'';
-  const why=deanon(j.reason,j.mapping);res.innerHTML=`${name} 认为最佳：<b>${esc(best)}</b>${agree}${why?'。'+esc(why):''}`;res.title=why;
+  const best=j.best==='tie'?T('tie'):j.best?tname(j.best):T('j.none');
+  const agree=r.winner&&j.best?(r.winner===j.best?`<span class="agree">${T('j.agree')}</span>`:''):'';
+  const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd){
@@ -1829,7 +2004,7 @@ async function send(prompt,tools,models,efforts,tag,cwd){
 }
 async function follow(th){
   const fq=$('.fq',th.el),p=fq.value.trim(),last=lastTurn(th);if(!p)return fq.focus();if(!last)return;
-  if(th.turns.some(r=>r.running))return toast('上一轮还在生成，等它结束再追问');
+  if(th.turns.some(r=>r.running))return toast(T('t.busy'));
   try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
     const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:''},th.turns.length);
     r.autoJudge=!!(CFG.judge&&JSEL.auto);
@@ -1839,7 +2014,7 @@ async function follow(th){
 }
 function submitComposer(){
   const p=$('#prompt').value.trim();if(!p)return $('#prompt').focus();
-  const tools=CFG.order.filter(t=>SEL[t].on);if(!tools.length)return toast('至少选中一个工具');
+  const tools=CFG.order.filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
   send(p,tools,Object.fromEntries(tools.map(t=>[t,SEL[t].model||''])),Object.fromEntries(tools.map(t=>[t,SEL[t].effort||''])),
     $('#tag').value.trim(),$('#cwd').value.trim())
     .then(ok=>{if(ok){$('#prompt').value='';autosize()}});
@@ -1889,59 +2064,60 @@ async function loadHistory(){
   const d=await api(`/api/history?q=${encodeURIComponent($('#hq').value)}&tag=${encodeURIComponent($('#htag').value)}`);
   $('#hlist').innerHTML=d.runs.map(r=>`<li class="hitem"><div class="hmain"><div class="hq">${esc(r.prompt)}</div>
     <div class="hmeta"><time>${fmtTime(r.created_at)}</time>${r.tag?`<span class="chip">${esc(r.tag)}</span>`:''}
-    ${r.nturns>1?`<span class="chip">${r.nturns} 轮</span>`:''}${(r.last_winner||r.winner)?`<span class="chip win">${winText(r.last_winner||r.winner)}</span>`:''}<span>${esc(r.scores||'未评分')}</span></div></div>
-    <div class="hact"><button class="btn sm" data-a="open" data-id="${esc(r.id)}">打开</button><button class="btn sm ghost" data-a="del" data-id="${esc(r.id)}">删除</button></div></li>`).join('')
-    ||'<li class="hitem" style="color:var(--muted)">没有找到记录</li>';
+    ${r.nturns>1?`<span class="chip">${T('rounds',r.nturns)}</span>`:''}${(r.last_winner||r.winner)?`<span class="chip win">${winText(r.last_winner||r.winner)}</span>`:''}<span>${esc(r.scores||T('h.unrated'))}</span></div></div>
+    <div class="hact"><button class="btn sm" data-a="open" data-id="${esc(r.id)}">${T('h.open')}</button><button class="btn sm ghost" data-a="del" data-id="${esc(r.id)}">${T('h.del')}</button></div></li>`).join('')
+    ||`<li class="hitem" style="color:var(--muted)">${T('h.none')}</li>`;
 }
 $('#hlist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.id;
   if(b.dataset.a==='open')openRun(id).catch(toast);
-  else if(confirm('删除这条对话（包括所有追问）？')){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
+  else if(confirm(T('h.confirm'))){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
 let hqT;$('#hq').oninput=()=>{clearTimeout(hqT);hqT=setTimeout(loadHistory,250)};$('#htag').onchange=loadHistory;
 
 /* ---------- 统计 ---------- */
 async function loadStats(){
   const d=await api(`/api/stats?tag=${encodeURIComponent($('#stag').value)}&by=${$('#sby').value}`);
-  $('#stotal').textContent=`共 ${d.total.n||0} 轮，已评判 ${d.total.judged||0} 轮`;
+  $('#stotal').textContent=T('s.total',d.total.n||0,d.total.judged||0);
   const pct=(a,b)=>b?Math.round(a/b*100)+'%':'—',by=$('#sby').value==='model';
-  $('#stable').innerHTML='<tr><th>工具</th><th>参加</th><th>成功率</th><th>平均分</th><th>打分数</th><th>最佳</th><th>胜率</th><th>平均耗时</th><th>平均字数</th></tr>'+
+  $('#stable').innerHTML='<tr>'+['s.tool','s.n','s.ok','s.avg','s.rated','s.best','s.win','s.secs','s.chars'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+
     (d.tools.map(r=>`<tr><td class="tool" style="--c:${esc(color(r.tool))}"><span class="dot"></span>${esc(tname(r.tool))}${by?`<small>${esc(modelLabel(r.tool,r.model))}${r.effort?'，effort '+esc(r.effort):''}</small>`:''}</td>
     <td>${r.n}</td><td>${pct(r.ok,r.n)}</td><td>${r.score!=null?r.score.toFixed(2)+`<span class="meter"><i style="width:${r.score/5*100}%"></i></span>`:'—'}</td>
     <td>${r.rated}</td><td>${r.wins||0}</td><td>${pct(r.wins||0,r.judged)}</td><td>${r.secs!=null?r.secs.toFixed(1)+'s':'—'}</td><td>${r.chars!=null?Math.round(r.chars):'—'}</td></tr>`).join('')
-    ||'<tr><td colspan="9" style="color:var(--muted);text-align:left">还没有数据</td></tr>');
+    ||`<tr><td colspan="9" style="color:var(--muted);text-align:left">${T('s.none')}</td></tr>`);
   renderJudgeStats(d);
 }
 $('#stag').onchange=loadStats;$('#sby').onchange=loadStats;
 function renderJudgeStats(d){
   const box=$('#sjudge');if(!CFG.judge){box.innerHTML='';return}const name=esc(tname(CFG.judge));
-  if(!(d.judge||[]).length){box.innerHTML=`<h3>${name} 评分</h3><p class="note-s" style="margin:0">还没有 ${name} 的评分。在输入区勾选「${name} 自动评分」，或在任意一轮下面点「让 ${name} 评分」。</p>`;return}
+  if(!(d.judge||[]).length){box.innerHTML=`<h3>${esc(T('sj.title',tname(CFG.judge)))}</h3><p class="note-s" style="margin:0">${esc(T('sj.empty',tname(CFG.judge)))}</p>`;return}
   const a=d.agree||{};
-  box.innerHTML=`<h3>${name} 评分<span class="note-s" style="font-weight:400;margin-left:10px">${a.total?`你和 ${name} 选的最佳一致：${a.agree||0} / ${a.total}（${Math.round((a.agree||0)/a.total*100)}%）`:'你和它都选过最佳的轮次越多，一致率越有参考价值'}</span></h3>
-  <table class="grid"><tr><th>工具</th><th>${name} 平均分</th><th>评过的回答</th><th>${name} 选为最佳</th></tr>${d.judge.map(r=>`<tr><td class="tool" style="--c:${esc(color(r.tool))}"><span class="dot"></span>${esc(tname(r.tool))}</td>
+  box.innerHTML=`<h3>${esc(T('sj.title',tname(CFG.judge)))}<span class="note-s" style="font-weight:400;margin-left:10px">${esc(a.total?T('sj.agree',tname(CFG.judge),a.agree||0,a.total,Math.round((a.agree||0)/a.total*100)):T('sj.agreeEmpty'))}</span></h3>
+  <table class="grid"><tr><th>${T('s.tool')}</th><th>${esc(T('sj.avg',tname(CFG.judge)))}</th><th>${T('sj.n')}</th><th>${esc(T('sj.best',tname(CFG.judge)))}</th></tr>${d.judge.map(r=>`<tr><td class="tool" style="--c:${esc(color(r.tool))}"><span class="dot"></span>${esc(tname(r.tool))}</td>
     <td>${r.avg!=null?r.avg.toFixed(2)+`<span class="meter"><i style="width:${r.avg/5*100}%"></i></span>`:'—'}</td><td>${r.n}</td><td>${r.best||0}</td></tr>`).join('')}</table>`;
 }
 
 /* ---------- 环境 ---------- */
 let jobT=0;
 async function loadEnv(){
-  $('#etable').innerHTML='<tr><td style="color:var(--muted)">正在检测，需要几秒…</td></tr>';
+  $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
-  $('#envNode').textContent=(d.node?`Node ${d.node}。`:'没检测到 Node.js。')+'一键安装会装到 ~/.ai-arena，不需要管理员权限。';
-  $('#etable').innerHTML='<tr><th>工具</th><th>状态</th><th>版本</th><th>位置</th><th>操作</th></tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
-    const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">登录</button><div class="hint">${esc(t.hint)}</div>`:'—')
-      :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?'安装中…':'一键安装'}</button>`:'—');
-    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?'<small>评分</small>':''}</td>
-      <td><span class="state ${t.path?'ok':'bad'}">${t.path?'已安装':'没找到'}</span></td><td>${esc(t.version||'—')}</td>
-      <td class="path">${esc(t.path||'没找到 '+t.exe)}</td><td>${act}</td></tr>`}).join('');
+  $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
+  $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
+    const hint=LANG==='en'?(t.hint_en||t.hint):t.hint;
+    const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
+      :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
+    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?`<small>${T('e.judge')}</small>`:''}</td>
+      <td><span class="state ${t.path?'ok':'bad'}">${t.path?T('e.ok'):T('e.missing')}</span></td><td>${esc(t.version||'—')}</td>
+      <td class="path">${esc(t.path||T('e.missingExe',t.exe))}</td><td>${act}</td></tr>`}).join('');
   $('#epath').textContent=d.path.split(':').join('\n');renderJobs(d.jobs);
 }
 function renderJobs(jobs){
-  $('#ejobs').innerHTML=Object.entries(jobs).map(([t,j])=>`<h4>${esc(tname(t))} 安装日志：${j.running?'进行中':j.ok?'成功':'失败'}</h4><pre class="joblog">${esc(j.log)}</pre>`).join('');
+  $('#ejobs').innerHTML=Object.entries(jobs).map(([t,j])=>`<h4>${esc(T('e.job',tname(t),j.running?T('e.running'):j.ok?T('e.done'):T('e.failed')))}</h4><pre class="joblog">${esc(j.log)}</pre>`).join('');
   $$('#ejobs .joblog').forEach(p=>p.scrollTop=p.scrollHeight);clearTimeout(jobT);
   if(Object.values(jobs).some(j=>j.running))jobT=setTimeout(async()=>{const j=await api('/api/jobs');Object.values(j).some(x=>x.running)?renderJobs(j):loadEnv()},1500);
 }
 $('#etable').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const t=b.dataset.t;
-  try{if(b.dataset.a==='install'){b.disabled=true;b.textContent='安装中…';await post('/api/install/'+t);renderJobs(await api('/api/jobs'))}
-  else{await post('/api/login/'+t);flash(b,'已打开终端')}}catch(err){toast(err);loadEnv()}};
+  try{if(b.dataset.a==='install'){b.disabled=true;b.textContent=T('e.installing');await post('/api/install/'+t);renderJobs(await api('/api/jobs'))}
+  else{await post('/api/login/'+t);flash(b,T('e.opened'))}}catch(err){toast(err);loadEnv()}};
 $('#recheck').onclick=loadEnv;
 
 /* ---------- 导航与启动 ---------- */
@@ -1951,12 +2127,13 @@ function show(v){$$('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v
 $$('nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
 async function refreshTags(){try{CFG.tags=(await api('/api/config')).tags}catch(e){}
   $('#tagList').innerHTML=CFG.tags.map(t=>`<option value="${esc(t)}">`).join('');
-  for(const id of ['#htag','#stag']){const v=$(id).value;$(id).innerHTML='<option value="">全部标签</option>'+CFG.tags.map(t=>`<option>${esc(t)}</option>`).join('');$(id).value=v}}
+  for(const id of ['#htag','#stag']){const v=$(id).value;$(id).innerHTML=`<option value="">${T('allTags')}</option>`+CFG.tags.map(t=>`<option>${esc(t)}</option>`).join('');$(id).value=v}}
 setInterval(()=>api('/api/ping').catch(()=>{}),60000);
-$('#quit').onclick=()=>{if(!confirm('关闭 AI Arena 后台服务？正在进行的对比会被停止。'))return;
+$('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   post('/api/shutdown').catch(()=>{}).finally(()=>{for(const r of ROUNDS.values())r.es&&r.es.close();
-    document.body.innerHTML='<p style="padding:64px;font-size:15px;line-height:1.8">AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。</p>'})};
+    document.body.innerHTML=`<p style="padding:64px;font-size:15px;line-height:1.8">${T('quit.done')}</p>`})};
 (async()=>{
+  applyI18n();
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
@@ -1987,7 +2164,7 @@ def idle_watchdog():
         time.sleep(30)
         busy = any(not r.finished_at for r in RUNS.values())
         if not busy and time.time() - LAST_SEEN > IDLE_SECS:
-            print(f"{IDLE_SECS}s 无人使用，自动退出")
+            print(f"Idle for {IDLE_SECS}s, exiting")
             shutdown()
             return
 
@@ -2006,7 +2183,7 @@ def main():
     if IDLE_EXIT:
         threading.Thread(target=idle_watchdog, daemon=True).start()
     url = f"http://127.0.0.1:{PORT}/"
-    print(f"AI Arena 已启动: {url}\n配置: {CFG_PATH}\n数据: {DB_PATH}\nPATH: {PATH_CACHE}\nCtrl+C 退出", flush=True)
+    print(f"AI Arena running at {url}\nConfig: {CFG_PATH}\nData: {DB_PATH}\nPATH: {PATH_CACHE}\nPress Ctrl+C to quit", flush=True)
     if "--no-open" not in sys.argv:
         threading.Timer(0.6, webbrowser.open, [url]).start()
     try:
@@ -2014,7 +2191,7 @@ def main():
     except KeyboardInterrupt:
         pass
     kill_all()
-    print("已退出")
+    print("Stopped")
 
 
 if __name__ == "__main__":

@@ -1,66 +1,65 @@
 # AI Arena
 
-同一个问题同时发给 **Claude Code**、**Codex** 和 **Antigravity CLI**，三列并排流式显示，可以打分、评「最佳」，并长期积累统计，看出不同模型在不同类型问题上的差异。
+Send one question to **Claude Code**, **Codex** and **Antigravity CLI** at the same time and read their answers side by side. Rate them, follow up, let **Grok** score them anonymously, and build up your own statistics on which model does best at what.
 
-本地运行，单个 Python 文件，只用标准库。
+AI Arena runs locally as a single Python file with no dependencies beyond the standard library. The interface is available in English and Chinese.
 
-![亮色界面](docs/screenshot-light.png)
+![Comparing three answers side by side](docs/compare.png)
 
-![追问](docs/screenshot-followup.png)
+## Features
 
-![Grok 评分](docs/screenshot-judge.png)
+- **Side-by-side streaming**: answers stream into three columns, each showing the model actually used, elapsed time and status. Switch between formatted Markdown and raw text.
+- **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered.
+- **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If a tool has no session ID from the last round, the earlier Q&A is added before the question instead.
+- **Conversation feed**: each card is a conversation. Older rounds fold automatically, and a three-color bar on each card shows how each tool did in the latest round.
+- **Reader mode**: expand long answers in place, or open a wide reading view and use ← → to switch between models.
+- **Anonymous scoring by Grok**: after a round (automatically or on demand), the successful answers are shuffled, relabeled A/B/C and sent to Grok. Grok scores accuracy, completeness, clarity and usefulness and picks a best answer. Grok does not compete, which avoids a model favoring its own style.
+- **Your ratings and stats**: give 1–5 stars, notes, and a best or tie for each round. The Stats page summarizes average score, win rate, time and length by tool, or by tool, model and effort, plus Grok's scores and how often your pick matches Grok's.
+- **History**: search (including follow-ups), filter by tag, reopen or rerun.
+- **Setup page**: checks whether each CLI is installed, installs missing ones into `~/.ai-arena` with one click (no admin rights needed), and opens Terminal for the one-time sign-in.
+- **macOS app**: double-click to start; it quits by itself after 15 idle minutes. Light and dark mode follow your system.
+- **English and Chinese**: switch languages from the top-right corner. Error messages, process logs and Grok's comments follow the selected language.
 
-## 功能
+![Follow-up questions continue each tool's own session](docs/follow-up.png)
 
-- **三列并排、流式输出**：每列显示实际使用的模型、用时、状态，支持 Markdown 排版和原文切换
-- **模型与 Effort 选择**：每个工具都可以选模型和 effort（思考投入程度），选择会被记住
-- **阅读模式**：长回答可以「展开全文」，或打开宽屏阅读窗口，用 ← → 在三个模型间切换
-- **追问**：在任意一轮下面接着问，每个工具沿用自己的会话继续回答（Claude `--resume`、Codex `exec resume`、Antigravity `--conversation`）；某个工具拿不到会话 ID 时，自动把之前的问答附在问题前面
-- **对话流**：每张卡片是一段对话，较早的轮次自动折叠；标题上的三色进度条一眼看出最新一轮各工具结果
-- **Grok 匿名评分**：每轮回答完成后（可设为自动），把回答打乱顺序、去掉工具名后交给 Grok，按准确、完整、清晰、实用四项打分并选出最佳；Grok 不参赛，避免「自己评自己」的偏差
-- **打分与统计**：1–5 星、备注、最佳/平手；统计页按工具，或按工具、模型和 effort 汇总平均分、胜率、耗时
-- **历史**：搜索、按标签筛选、重跑
-- **环境页**：检测三个 CLI 是否安装，一键安装（装到 `~/.ai-arena`，不需要管理员权限）并打开终端登录
-- **macOS App**：双击启动，空闲 15 分钟自动退出；跟随系统亮色 / 暗色
+## Getting started
 
-## 使用
-
-需要 Python 3.8+ 和 macOS（Linux 也能运行网页部分）。
+You need Python 3.8 or later. The app launcher is for macOS; the web interface also runs on Linux.
 
 ```bash
 git clone https://github.com/alanshen1/AI-Arena.git
 cd AI-Arena
-python3 arena.py          # 打开 http://127.0.0.1:8765
+python3 arena.py          # opens http://127.0.0.1:8765
 ```
 
-或者双击 `macos/AI Arena.app`。第一次如果 macOS 提示无法打开，右键选「打开」确认一次即可。
+Or double-click `macos/AI Arena.app`. If macOS says the app cannot be opened the first time, right-click it and choose **Open**.
 
-第一次使用：进入「环境」页，对没找到的工具点「一键安装」，再点「登录」在弹出的终端里登录一次。
+On first use, go to the **Setup** page. For each missing tool, click **Install**, then **Sign in** and finish signing in in the Terminal window that opens.
 
-| 工具 | 命令 | 登录方式 |
+| Tool | Command | Sign in with |
 |---|---|---|
-| Claude Code | `claude -p` | Claude 账号 |
-| Codex | `codex exec` | ChatGPT 账号 |
-| Antigravity CLI | `agy -p` | Google 账号 |
-| Grok CLI（评分用） | `grok -p` | xAI / X 账号 |
+| Claude Code | `claude -p` | Claude account |
+| Codex | `codex exec` | ChatGPT account |
+| Antigravity CLI | `agy -p` | Google account |
+| Grok CLI (scoring only) | `grok -p` | xAI / X account |
 
-> Gemini CLI 自 2026-06-18 起不再支持个人账号，已由 Antigravity CLI 取代。配置里保留了 Gemini（默认停用），有付费 Gemini API key 时可以重新启用。
+> Gemini CLI stopped supporting personal accounts on June 18, 2026 and has been replaced by Antigravity CLI. Gemini remains in the config, disabled by default; you can re-enable it if you have a paid Gemini API key.
 
-## 文件
+## Files
 
-| 文件 | 说明 |
+| File | Purpose |
 |---|---|
-| `arena.py` | 后端（HTTP + SSE 流式 + SQLite），内置一份网页 |
-| `arena.html` | 网页界面；放在 `arena.py` 旁边时优先使用，方便单独修改 |
-| `macos/AI Arena.app` | macOS 启动器 |
+| `arena.py` | Backend (HTTP, SSE streaming, SQLite) with a built-in copy of the web page |
+| `arena.html` | Web interface; used instead of the built-in copy when it sits next to `arena.py`, so you can edit it separately |
+| `macos/AI Arena.app` | macOS launcher |
 
-首次运行会生成（已在 `.gitignore` 中排除）：
+Created on first run and excluded by `.gitignore`:
 
-- `arena_config.json`：各工具的命令、模型列表、effort 参数，可自行修改或加入新工具
-- `arena.db`：历史、评分（SQLite）
-- `arena.log`：App 启动日志
+- `arena_config.json`: commands, model lists and effort options for each tool. Edit it or add new tools.
+- `arena.db`: history, ratings and scores (SQLite).
+- `arena.log`: launcher log.
 
-## 配置示例
+## Configuration
 
 ```json
 "claude": {
@@ -68,22 +67,37 @@ python3 arena.py          # 打开 http://127.0.0.1:8765
   "parser": "claude_stream",
   "model_flag": "--model",
   "effort_args": ["--effort", "{effort}"],
-  "efforts": ["low", "medium", "high", "xhigh", "max"]
+  "efforts": ["low", "medium", "high", "xhigh", "max"],
+  "resume_args": ["--resume", "{session}"]
 }
 ```
 
-- `pty: true`：用伪终端运行（Antigravity CLI 在非终端环境下可能卡住）
-- `models_cmd`：动态读取可用模型（如 `agy models`）
-- `resume_args` / `resume_pos`：追问时续接会话的参数（`{session}` 会被替换成会话 ID）
-- `enabled: false`：停用某个工具
-- `role: "judge"`：作为评分模型，不参加对比（默认是 Grok）
+| Key | Meaning |
+|---|---|
+| `cmd` | Command to run; `{prompt}` is replaced by the question |
+| `parser` | How to read the output: `claude_stream`, `codex_json`, `agy_stream` or `raw` |
+| `model_flag` / `models` | Option used to pass the model, and the models offered in the picker |
+| `effort_args` / `efforts` | Arguments used to pass effort (`{effort}` is replaced), and the levels offered |
+| `resume_args` / `resume_pos` | Arguments used to continue a session for follow-ups (`{session}` is replaced) |
+| `models_cmd` | Command that lists available models at runtime, e.g. `agy models` |
+| `pty: true` | Run in a pseudo-terminal (Antigravity CLI can hang without a terminal) |
+| `install_script` / `package` | One-click install method: a shell script, or an npm package |
+| `role: "judge"` | Use this tool for scoring instead of competing (Grok by default) |
+| `enabled: false` | Turn a tool off |
 
-## 安全
+## Privacy and safety
 
-- 只监听 `127.0.0.1`，每次启动生成随机 token，并校验 Host 头，防止其他网页调用本地接口
-- 模型输出经 DOMPurify 清理后再渲染
-- 填写「工作目录」时，CLI 可能真的修改其中的文件，对比改代码类问题时建议指向一份拷贝
+- The server listens on `127.0.0.1` only. Each start creates a random token, and the Host header is checked, so other web pages cannot call your local CLIs.
+- Model output is sanitized with DOMPurify before it is rendered.
+- Scoring hides which model wrote each answer, but an answer that names itself (for example, "As Claude…") can still give it away.
+- If you set a working folder, the CLIs may change files in it. When comparing coding tasks, point it at a copy.
 
-## 第三方
+## Screenshots
 
-网页内嵌 [marked](https://github.com/markedjs/marked)（MIT）和 [DOMPurify](https://github.com/cure53/DOMPurify)（Apache-2.0 / MPL-2.0），离线也能正常排版。
+| Reader mode | Stats | Dark mode |
+|---|---|---|
+| ![Reader](docs/reader.png) | ![Stats](docs/stats.png) | ![Dark mode](docs/dark.png) |
+
+## Third-party code
+
+The web page embeds [marked](https://github.com/markedjs/marked) (MIT) and [DOMPurify](https://github.com/cure53/DOMPurify) (Apache-2.0 / MPL-2.0), so formatting works offline.
