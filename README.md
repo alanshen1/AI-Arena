@@ -8,6 +8,8 @@
 
 ![追问](docs/screenshot-followup.png)
 
+![Grok 评分](docs/screenshot-judge.png)
+
 ## 功能
 
 - **三列并排、流式输出**：每列显示实际使用的模型、用时、状态，支持 Markdown 排版和原文切换
@@ -15,6 +17,7 @@
 - **阅读模式**：长回答可以「展开全文」，或打开宽屏阅读窗口，用 ← → 在三个模型间切换
 - **追问**：在任意一轮下面接着问，每个工具沿用自己的会话继续回答（Claude `--resume`、Codex `exec resume`、Antigravity `--conversation`）；某个工具拿不到会话 ID 时，自动把之前的问答附在问题前面
 - **对话流**：每张卡片是一段对话，较早的轮次自动折叠；标题上的三色进度条一眼看出最新一轮各工具结果
+- **Grok 匿名评分**：每轮回答完成后（可设为自动），把回答打乱顺序、去掉工具名后交给 Grok，按准确、完整、清晰、实用四项打分并选出最佳；Grok 不参赛，避免「自己评自己」的偏差
 - **打分与统计**：1–5 星、备注、最佳/平手；统计页按工具，或按工具、模型和 effort 汇总平均分、胜率、耗时
 - **历史**：搜索、按标签筛选、重跑
 - **环境页**：检测三个 CLI 是否安装，一键安装（装到 `~/.ai-arena`，不需要管理员权限）并打开终端登录
@@ -39,6 +42,7 @@ python3 arena.py          # 打开 http://127.0.0.1:8765
 | Claude Code | `claude -p` | Claude 账号 |
 | Codex | `codex exec` | ChatGPT 账号 |
 | Antigravity CLI | `agy -p` | Google 账号 |
+| Grok CLI（评分用） | `grok -p` | xAI / X 账号 |
 
 > Gemini CLI 自 2026-06-18 起不再支持个人账号，已由 Antigravity CLI 取代。配置里保留了 Gemini（默认停用），有付费 Gemini API key 时可以重新启用。
 
@@ -72,6 +76,7 @@ python3 arena.py          # 打开 http://127.0.0.1:8765
 - `models_cmd`：动态读取可用模型（如 `agy models`）
 - `resume_args` / `resume_pos`：追问时续接会话的参数（`{session}` 会被替换成会话 ID）
 - `enabled: false`：停用某个工具
+- `role: "judge"`：作为评分模型，不参加对比（默认是 Grok）
 
 ## 安全
 

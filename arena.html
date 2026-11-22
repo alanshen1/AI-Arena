@@ -140,6 +140,18 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
 .fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
+.judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
+.jd{padding:7px 12px 8px;font-size:12.5px;line-height:1.6;color:var(--muted);border-top:1px dashed var(--line);background:color-mix(in srgb,var(--soft) 55%,transparent)}
+.jd b{color:var(--ink);margin-right:6px}
+.jd .jx{font-size:11.5px;margin-left:6px;opacity:.85}
+.jres{font-size:12.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+.jres b{color:var(--ink)}
+.jres.err{color:var(--bad)}
+.jres .agree{color:var(--ok);margin-left:6px}
+#sjudge{margin-top:22px}
+#sjudge h3{font-size:14px;margin:0 0 10px}
 
 /* 单列 */
 .col{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--solid);overflow:hidden}
@@ -260,6 +272,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <div class="copts">
       <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签"><datalist id="tagList"></datalist>
       <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录">
+      <span class="judgeopt" id="judgeOpt" hidden></span>
       <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> 发送</span>
     </div>
   </div>
@@ -278,6 +291,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <select class="field" id="sby"><option value="">按工具</option><option value="model">按工具、模型和 effort</option></select>
     <span id="stotal" class="note-s" style="margin:0"></span></div>
   <table class="grid" id="stable"></table>
+  <div id="sjudge"></div>
   <p class="note-s">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
 </section>
 
@@ -407,8 +421,9 @@ function makeTurn(th,meta,idx){
   const el=r.el=document.createElement('section');el.className='turn';
   el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">第 ${idx+1} 轮</span><span class="tq"></span><span class="tsum"></span></div>
     <div class="tbody"><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
-    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button><span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
+    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button>${CFG.judge?`<button class="btn sm ghost jbtn">让 ${esc(tname(CFG.judge))} 评分</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
+  if(CFG.judge)$('.jbtn',el).onclick=()=>askJudge(r);
   const h2=$('.th2',el);h2.onclick=()=>fold(r,!r.folded);
   h2.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fold(r,!r.folded)}};
   $('.tie',el).onclick=()=>setWinner(r,r.winner==='tie'?'':'tie');
@@ -418,7 +433,8 @@ function makeTurn(th,meta,idx){
   paintWinner(r);return r;
 }
 function fillTurn(r,d){   // 已完成的轮次直接用数据库里的结果；还在跑的才接流
-  r.winner=d.winner||'';
+  r.winner=d.winner||'';r.autoJudge=!!d.auto_judge;
+  if(d.judgment){renderJudge(r,d.judgment);if(d.judgment.running)pollJudge(r)}
   for(const x of d.ratings||[])if(r.S[x.tool]){Object.assign(r.S[x.tool],{score:x.score,note:x.note||''});$('.note',r.S[x.tool].el).value=x.note||'';paintStars(r,x.tool)}
   paintWinner(r);
   if(d.running){openStream(r);return}
@@ -446,6 +462,7 @@ function makeCol(r,t,parent){
   <div class="body" tabindex="0"></div><button class="more">展开全文</button>
   <div class="cf"><span class="stars">${[1,2,3,4,5].map(i=>`<button class="star" data-v="${i}" aria-label="${i} 星">★</button>`).join('')}</span>
     <input class="note" placeholder="写点备注" aria-label="${esc(tname(t))} 的备注"><button class="btn sm ghost win">最佳</button></div>
+  <div class="jd" hidden></div>
   <details class="log"><summary>过程日志<span class="cost"></span></summary><pre></pre></details>`;
   $('.raw',c).onclick=()=>{s.raw=!s.raw;paint(r,t)};
   $('.cp',c).onclick=e=>copyText(clean(s.out),e.currentTarget);
@@ -493,7 +510,7 @@ function openStream(r){
   const es=r.es=new EventSource(`/api/stream/${encodeURIComponent(r.id)}?token=${TOKEN}`);
   es.onopen=()=>{for(const t of r.tools){Object.assign(r.S[t],{out:'',log:'',status:'',secs:null,t0:null,actual:''});paint(r,t)}};
   es.onmessage=e=>{const ev=JSON.parse(e.data);
-    if(ev.type==='end'){es.close();r.es=null;setRunning(r,false);refreshTags();return}
+    if(ev.type==='end'){es.close();r.es=null;setRunning(r,false);refreshTags();if(r.autoJudge)pollJudge(r,true);return}
     const s=r.S[ev.tool];if(!s)return;
     if(ev.type==='start'){s.status='run';s.t0=Date.now();if(ev.model!=null)s.model=ev.model;if(ev.effort!=null)s.effort=ev.effort;setRunning(r,true);$('.ch b',s.el).title=ev.cmd||''}
     else if(ev.type==='out')s.out+=ev.data;else if(ev.type==='log')s.log+=ev.data;
@@ -507,23 +524,69 @@ function paintWinner(r){const w=r.winner;
   $('.tie',r.el).classList.toggle('on',w==='tie');
   $('.tsum',r.el).innerHTML=w?`<span class="chip win">${winText(w)}</span>`:'';
   if(r===lastTurn(r.th))paintHead(r.th)}
-function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+
+/* ---------- 评分（匿名交给第三方模型） ---------- */
+let JSEL={model:'',auto:false};
+function renderJudgeOpt(){
+  const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
+  const v=CFG.tools[CFG.judge],opts=[{id:'',label:v.default_label||'默认'},...(v.models||[])];
+  box.hidden=false;
+  box.innerHTML=`<label title="每轮回答完成后，自动把三份回答匿名交给 ${esc(tname(CFG.judge))} 评分"><input type="checkbox" id="jauto" ${JSEL.auto?'checked':''}>${esc(tname(CFG.judge))} 自动评分</label>
+    <select id="jmodel" aria-label="评分使用的模型">${opts.map(o=>`<option value="${esc(o.id)}"${o.id===JSEL.model?' selected':''}>${esc(o.label)}</option>`).join('')}</select>`;
+  $('#jauto').onchange=e=>{JSEL.auto=e.target.checked;ls.set('arenaJudge',JSEL)};
+  $('#jmodel').onchange=e=>{JSEL.model=e.target.value;ls.set('arenaJudge',JSEL)};
+}
+async function askJudge(r){
+  const b=$('.jbtn',r.el);b.disabled=true;
+  try{await post('/api/judge/'+encodeURIComponent(r.id),{model:JSEL.model});renderJudge(r,{status:'running',running:true});pollJudge(r)}
+  catch(e){b.disabled=false;toast(e)}
+}
+function pollJudge(r,waitStart){
+  clearTimeout(r.jt);let tries=0;
+  const tick=async()=>{tries++;
+    try{const j=await api('/api/judge/'+encodeURIComponent(r.id));renderJudge(r,j);if(j.running||j.status==='running')r.jt=setTimeout(tick,2000)}
+    catch(e){if(waitStart&&tries<8)r.jt=setTimeout(tick,1500)}};
+  r.jt=setTimeout(tick,waitStart?1200:2000);
+}
+function deanon(t,map){  // 把 Grok 点评里的匿名标签（回答 A、A 比 C）换回工具名
+  const nm=l=>map&&map[l]?tname(map[l]):null;
+  return String(t||'').replace(/回答\s*([A-H])/g,(m,l)=>nm(l)||m)
+    .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
+}
+function renderJudge(r,j){
+  r.judge=j;const name=esc(tname(CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
+  const busy=j.running||j.status==='running';
+  b.disabled=busy;b.textContent=busy?`${tname(CFG.judge)} 评分中…`:j.status==='ok'?'重新评分':j.status?'重试评分':`让 ${tname(CFG.judge)} 评分`;
+  res.classList.toggle('err',j.status==='error');res.title='';
+  for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
+  if(busy){res.innerHTML='匿名打乱后交给 '+name+' 评审中…';return}
+  if(j.status==='error'){res.textContent=`评分失败：${j.reason||'未知原因'}`;res.title=(j.raw||'').slice(-2000);return}
+  if(j.status!=='ok'){res.textContent='';return}
+  for(const x of j.scores||[]){const s=r.S[x.tool];if(!s)continue;const jd=$('.jd',s.el);jd.hidden=false;
+    const det=Object.entries(x.detail||{}).map(([k,v])=>({accuracy:'准确',completeness:'完整',clarity:'清晰',usefulness:'实用'}[k]||k)+' '+v).join('  ');
+    jd.innerHTML=`<b>${name} ${x.overall!=null?x.overall:'—'}/5</b>${esc(deanon(x.comment,j.mapping))}${det?`<span class="jx">${esc(det)}</span>`:''}`}
+  const best=j.best==='tie'?'平手':j.best?tname(j.best):'未选出';
+  const agree=r.winner&&j.best?(r.winner===j.best?'<span class="agree">和你的选择一致</span>':''):'';
+  const why=deanon(j.reason,j.mapping);res.innerHTML=`${name} 认为最佳：<b>${esc(best)}</b>${agree}${why?'。'+esc(why):''}`;res.title=why;
+}
 
 async function send(prompt,tools,models,efforts,tag,cwd){
-  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd});
+  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
     const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd};
     const th=makeRound(meta);th.built=true;
     $('#empty').hidden=true;feed.prepend(th.el);
-    const r=makeTurn(th,meta,0);setOpen(th,true);paintHead(th);openStream(r);
+    const r=makeTurn(th,meta,0);r.autoJudge=!!(CFG.judge&&JSEL.auto);setOpen(th,true);paintHead(th);openStream(r);
     window.scrollTo({top:0,behavior:'smooth'});return true}
   catch(e){toast(e);return false}
 }
 async function follow(th){
   const fq=$('.fq',th.el),p=fq.value.trim(),last=lastTurn(th);if(!p)return fq.focus();if(!last)return;
   if(th.turns.some(r=>r.running))return toast('上一轮还在生成，等它结束再追问');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id});
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
     const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:''},th.turns.length);
+    r.autoJudge=!!(CFG.judge&&JSEL.auto);
     foldOld(th);paintHead(th);openStream(r);fq.value='';fq.style.height='auto';
     r.el.scrollIntoView({behavior:'smooth',block:'start'})}
   catch(e){toast(e)}
@@ -599,8 +662,17 @@ async function loadStats(){
     <td>${r.n}</td><td>${pct(r.ok,r.n)}</td><td>${r.score!=null?r.score.toFixed(2)+`<span class="meter"><i style="width:${r.score/5*100}%"></i></span>`:'—'}</td>
     <td>${r.rated}</td><td>${r.wins||0}</td><td>${pct(r.wins||0,r.judged)}</td><td>${r.secs!=null?r.secs.toFixed(1)+'s':'—'}</td><td>${r.chars!=null?Math.round(r.chars):'—'}</td></tr>`).join('')
     ||'<tr><td colspan="9" style="color:var(--muted);text-align:left">还没有数据</td></tr>');
+  renderJudgeStats(d);
 }
 $('#stag').onchange=loadStats;$('#sby').onchange=loadStats;
+function renderJudgeStats(d){
+  const box=$('#sjudge');if(!CFG.judge){box.innerHTML='';return}const name=esc(tname(CFG.judge));
+  if(!(d.judge||[]).length){box.innerHTML=`<h3>${name} 评分</h3><p class="note-s" style="margin:0">还没有 ${name} 的评分。在输入区勾选「${name} 自动评分」，或在任意一轮下面点「让 ${name} 评分」。</p>`;return}
+  const a=d.agree||{};
+  box.innerHTML=`<h3>${name} 评分<span class="note-s" style="font-weight:400;margin-left:10px">${a.total?`你和 ${name} 选的最佳一致：${a.agree||0} / ${a.total}（${Math.round((a.agree||0)/a.total*100)}%）`:'你和它都选过最佳的轮次越多，一致率越有参考价值'}</span></h3>
+  <table class="grid"><tr><th>工具</th><th>${name} 平均分</th><th>评过的回答</th><th>${name} 选为最佳</th></tr>${d.judge.map(r=>`<tr><td class="tool" style="--c:${esc(color(r.tool))}"><span class="dot"></span>${esc(tname(r.tool))}</td>
+    <td>${r.avg!=null?r.avg.toFixed(2)+`<span class="meter"><i style="width:${r.avg/5*100}%"></i></span>`:'—'}</td><td>${r.n}</td><td>${r.best||0}</td></tr>`).join('')}</table>`;
+}
 
 /* ---------- 环境 ---------- */
 let jobT=0;
@@ -611,7 +683,7 @@ async function loadEnv(){
   $('#etable').innerHTML='<tr><th>工具</th><th>状态</th><th>版本</th><th>位置</th><th>操作</th></tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">登录</button><div class="hint">${esc(t.hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?'安装中…':'一键安装'}</button>`:'—');
-    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
+    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?'<small>评分</small>':''}</td>
       <td><span class="state ${t.path?'ok':'bad'}">${t.path?'已安装':'没找到'}</span></td><td>${esc(t.version||'—')}</td>
       <td class="path">${esc(t.path||'没找到 '+t.exe)}</td><td>${act}</td></tr>`}).join('');
   $('#epath').textContent=d.path.split(':').join('\n');renderJobs(d.jobs);
@@ -642,6 +714,7 @@ $('#quit').onclick=()=>{if(!confirm('关闭 AI Arena 后台服务？正在进行
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
-  renderLanes();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
+  JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
+  renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>

@@ -10,7 +10,7 @@
 界面在同目录的 arena.html（缺失时用脚本内置版本）。
 仅依赖 Python 3.8+ 标准库。
 """
-import codecs, copy, glob, json, os, platform, re, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
+import codecs, copy, glob, json, os, platform, random, re, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -26,7 +26,8 @@ LAST_SEEN = time.time()
 SRV = None
 
 DEFAULT_CFG = {
-    "version": 2,
+    "version": 3,
+    "judge_timeout": 300,
     "timeout": 600,
     "tools": {
         "claude": {
@@ -61,6 +62,12 @@ DEFAULT_CFG = {
             "model_flag": "--model", "default_label": "默认（自动选择）",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models_cmd": ["agy", "models"], "models": []},
+        "grok": {"role": "judge",  # 评分模型，不参赛
+                 "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
+                 "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
+                 "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号",
+                 "model_flag": "-m", "default_label": "默认",
+                 "models": [{"id": "grok-4.7", "label": "Grok 4.7"}, {"id": "grok-4.5", "label": "Grok 4.5"}]},
         "gemini": {"enabled": False,  # 个人账户自 2026-06-18 起停止服务；有付费 Gemini API key 可改为 true
                    "cmd": ["gemini", "-p", "{prompt}"], "parser": "raw", "color": "#4285f4",
                    "package": "@google/gemini-cli",
@@ -99,14 +106,23 @@ def load_cfg():
                 sp["parser"] = DEFAULT_CFG["tools"][name]["parser"]
         cfg["version"] = 2
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    if cfg.get("version", 1) < 3:  # v3：加入评分模型 Grok
+        tools.setdefault("grok", copy.deepcopy(DEFAULT_CFG["tools"]["grok"]))
+        cfg.setdefault("judge_timeout", DEFAULT_CFG["judge_timeout"])
+        cfg["version"] = 3
+        CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     for name, spec in tools.items():  # 旧配置补上新字段
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
             spec.setdefault(k, copy.deepcopy(v))
     return cfg
 
 
-def enabled_tools(cfg):
-    return [n for n, sp in cfg["tools"].items() if sp.get("enabled", True)]
+def enabled_tools(cfg):  # 参赛工具（不含评分模型）
+    return [n for n, sp in cfg["tools"].items() if sp.get("enabled", True) and sp.get("role") != "judge"]
+
+
+def judge_tool(cfg):
+    return next((n for n, sp in cfg["tools"].items() if sp.get("role") == "judge" and sp.get("enabled", True)), None)
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]")
@@ -241,10 +257,11 @@ def doctor():
                 ver = lines[0][:80] if lines else ""
             except Exception:
                 ver = "（检测超时）"
-        res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "install": bool(spec.get("package") or spec.get("install_script")),
+        res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""), "install": bool(spec.get("package") or spec.get("install_script")),
                      "login": spec.get("login") or "", "hint": spec.get("hint") or ""}
 
-    ths = [threading.Thread(target=check, args=(n, cfg["tools"][n])) for n in enabled_tools(cfg)]
+    names = enabled_tools(cfg) + ([judge_tool(cfg)] if judge_tool(cfg) else [])
+    ths = [threading.Thread(target=check, args=(n, cfg["tools"][n])) for n in names]
     for th in ths:
         th.start()
     for th in ths:
@@ -390,6 +407,10 @@ CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds 
   session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
 CREATE TABLE IF NOT EXISTS ratings(run_id TEXT, tool TEXT, score INTEGER, note TEXT,
   PRIMARY KEY(run_id, tool));
+CREATE TABLE IF NOT EXISTS judgments(run_id TEXT PRIMARY KEY, judge TEXT, model TEXT, status TEXT, best TEXT,
+  reason TEXT, mapping TEXT, result TEXT, raw TEXT, seconds REAL, created_at REAL);
+CREATE TABLE IF NOT EXISTS judge_scores(run_id TEXT, tool TEXT, overall REAL, detail TEXT, comment TEXT,
+  PRIMARY KEY(run_id, tool));
 """
 DB_LOCK = threading.Lock()
 
@@ -421,6 +442,7 @@ class Run:
         self.id, self.events, self.cond = rid, [], threading.Condition()
         self.pending, self.procs = set(tools), {}
         self.cancelled, self.finished_at = False, None
+        self.judge, self.judge_model = False, ""
 
     def emit(self, ev):
         with self.cond:
@@ -800,10 +822,154 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         if not run.pending:
             run.finished_at = time.time()
             run.events.append({"type": "end"})
+            if run.judge and not run.cancelled:  # 自动评分
+                threading.Thread(target=start_judge, args=(run.id, run.judge_model), daemon=True).start()
         run.cond.notify_all()
 
 
-def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None):
+# ---------------- 评分（Grok 等第三方模型匿名评审） ----------------
+JUDGING = set()
+JUDGE_KEYS = ("accuracy", "completeness", "clarity", "usefulness")
+
+
+def build_judge_prompt(question, earlier, answers):
+    lines = ["你是一位严格、公正的评审。下面是同一个问题的几份匿名回答，标为 A、B、C……，顺序是随机打乱的。",
+             "请只根据内容评审，不要猜测或考虑它们来自哪个模型。不要使用任何工具，不要读写文件。", ""]
+    if earlier:
+        lines.append("这是多轮对话中的一轮。在此之前，提问者依次问过：")
+        lines += [f"{i}. {x}" for i, x in enumerate(earlier, 1)]
+        lines += ["（每位回答者都能看到自己之前的对话。）", ""]
+    lines += ["【问题】", question, ""]
+    for lab, text in answers:
+        t = text.strip()
+        if len(t) > 12000:
+            t = t[:12000] + "\n……（后面省略）"
+        lines += [f"【回答 {lab}】", t, ""]
+    lines += ["评分标准（每项 1 到 5 分，5 最好）：",
+              "- accuracy 准确性：事实是否正确，有没有错误或编造",
+              "- completeness 完整性：是否覆盖问题的关键方面",
+              "- clarity 清晰度：结构和表达是否清楚易读",
+              "- usefulness 实用性：对提问者是否真正有帮助",
+              "- overall 总分 1 到 5：综合判断，不是简单平均",
+              "",
+              "只输出一个 JSON 对象，不要输出任何其他文字。格式：",
+              '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"一句中文点评"}},'
+              '"best":"A","reason":"一两句中文，说明为什么选它"}',
+              'scores 里要包含每一份回答。如果难分高下，best 填 "tie"。']
+    return "\n".join(lines)
+
+
+def parse_judge(text):
+    t = ANSI_RE.sub("", text or "")
+    cands = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", t, re.S)
+    depth, start = 0, None
+    for i, ch in enumerate(t):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                cands.append(t[start:i + 1])
+    for c in sorted(cands, key=len, reverse=True):
+        try:
+            o = json.loads(c)
+        except ValueError:
+            continue
+        if isinstance(o, dict) and isinstance(o.get("scores"), dict):
+            return o
+    return None
+
+
+def judgment(rid):
+    j = q("SELECT * FROM judgments WHERE run_id=?", (rid,), one=True)
+    if j:
+        j["mapping"] = json.loads(j.get("mapping") or "{}")
+        j["result"] = json.loads(j.get("result") or "{}")
+        j["scores"] = q("SELECT tool, overall, detail, comment FROM judge_scores WHERE run_id=?", (rid,))
+        for x in j["scores"]:
+            x["detail"] = json.loads(x["detail"] or "{}")
+        j["running"] = rid in JUDGING
+    return j
+
+
+def start_judge(rid, model=""):
+    if rid in JUDGING:
+        return "已经在评分中"
+    cfg = load_cfg()
+    jn = judge_tool(cfg)
+    if not jn:
+        return "没有配置评分模型"
+    spec = cfg["tools"][jn]
+    label = spec.get("label") or jn
+    exe = which(spec["cmd"][0])
+    if not exe:
+        return f"没有找到 {spec['cmd'][0]}，请先在「环境」页安装 {label}"
+    run = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
+    if not run:
+        return "这一轮不存在"
+    outs = [o for o in q("SELECT tool, output, status FROM outputs WHERE run_id=?", (rid,))
+            if o["status"] == "ok" and (o["output"] or "").strip()]
+    if len(outs) < 2:
+        return "至少要有两份成功的回答才能评分"
+    thread = run.get("thread") or rid
+    earlier = [x["prompt"] for x in q("SELECT prompt FROM runs WHERE (id=? OR thread=?) AND created_at<? "
+                                       "ORDER BY created_at", (thread, thread, run["created_at"]))]
+    random.shuffle(outs)  # 打乱顺序并匿名，避免位置和品牌偏差
+    labels = "ABCDEFGH"
+    mapping = {labels[i]: o["tool"] for i, o in enumerate(outs)}
+    prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)])
+    q("DELETE FROM judge_scores WHERE run_id=?", (rid,))
+    q("INSERT OR REPLACE INTO judgments(run_id, judge, model, status, best, reason, mapping, result, raw, seconds, created_at) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, jn, model, "running", "", "", json.dumps(mapping), "{}", "", 0, time.time()))
+    JUDGING.add(rid)
+
+    def work():
+        t0 = time.time()
+        base = list(spec["cmd"])
+        if model and spec.get("model_flag"):
+            i = base.index("{prompt}") if "{prompt}" in base else len(base)
+            if i > 0 and base[i - 1].startswith("-"):
+                i -= 1
+            base[i:i] = [spec["model_flag"], model]
+        cmd = [prompt if a == "{prompt}" else a for a in base]
+        status, best, reason, result, raw = "error", "", "", {}, ""
+        try:
+            r = subprocess.run([exe] + cmd[1:], capture_output=True, text=True, timeout=cfg.get("judge_timeout", 300),
+                               env=child_env(), stdin=subprocess.DEVNULL, cwd=tempfile.mkdtemp(prefix="arena-judge-"))
+            raw = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr.strip() else "")
+            o = parse_judge(r.stdout) if r.returncode == 0 else None
+            if not o:
+                reason = f"{label} 退出码 {r.returncode}" if r.returncode else f"没能从 {label} 的回复里解析出评分"
+            else:
+                rows = []
+                for lab, tool in mapping.items():
+                    sc = o["scores"].get(lab) or o["scores"].get(f"回答 {lab}") or {}
+                    try:
+                        overall = float(sc.get("overall"))
+                    except (TypeError, ValueError):
+                        overall = None
+                    detail = {k: sc.get(k) for k in JUDGE_KEYS if sc.get(k) is not None}
+                    rows.append((rid, tool, overall, json.dumps(detail), str(sc.get("comment") or "")))
+                b = str(o.get("best") or "").strip().upper()
+                best = "tie" if b in ("TIE", "平手") else mapping.get(b.replace("回答", "").strip(), "")
+                reason, result, status = str(o.get("reason") or ""), o, "ok"
+                for row in rows:
+                    q("INSERT OR REPLACE INTO judge_scores(run_id, tool, overall, detail, comment) VALUES(?,?,?,?,?)", row)
+        except subprocess.TimeoutExpired:
+            reason = f"{label} 超过 {cfg.get('judge_timeout', 300)} 秒没有回复"
+        except Exception as e:
+            reason = str(e)
+        q("UPDATE judgments SET status=?, best=?, reason=?, result=?, raw=?, seconds=? WHERE run_id=?",
+          (status, best, reason, json.dumps(result, ensure_ascii=False), raw[-20000:], round(time.time() - t0, 1), rid))
+        JUDGING.discard(rid)
+
+    threading.Thread(target=work, daemon=True).start()
+    return ""
+
+
+def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model=""):
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories = "", "", {}, {}
@@ -834,6 +1000,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None):
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
                                         json.dumps(models), json.dumps(efforts), thread or rid, parent_id))
     run = Run(rid, tools)
+    run.judge, run.judge_model = bool(judge), str(judge_model or "")
     RUNS[rid] = run
     for t in tools:
         threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, cwd, cfg.get("timeout", 600),
@@ -853,6 +1020,8 @@ def run_detail(rid, with_turns=True):
     r["ratings"] = q("SELECT tool, score, note FROM ratings WHERE run_id=?", (rid,))
     live = RUNS.get(rid)
     r["running"] = bool(live and not live.finished_at)
+    r["judgment"] = judgment(rid)
+    r["auto_judge"] = bool(live and live.judge)
     if with_turns:
         root = r.get("thread") or rid
         ids = [x["id"] for x in q("SELECT id FROM runs WHERE id=? OR thread=? ORDER BY created_at", (root, root))]
@@ -918,6 +1087,9 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif p.startswith("/api/judge/"):
+            j = judgment(p.rsplit("/", 1)[1])
+            self._json(j) if j else self._json({"error": "还没有评分"}, 404)
         elif p == "/api/doctor":
             self._json(doctor())
         elif p == "/api/jobs":
@@ -932,7 +1104,7 @@ class H(BaseHTTPRequestHandler):
                                       "flag": bool(v.get("model_flag")), "default_label": v.get("default_label", "默认"),
                                       "efforts": v.get("efforts", []) if v.get("effort_args") else []}
                                   for k, v in cfg["tools"].items()},
-                        "order": enabled_tools(cfg), "tags": tags})
+                        "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
         elif p.startswith("/api/stream/"):
             self._sse(p.rsplit("/", 1)[1])
         elif p.startswith("/api/run/"):
@@ -959,7 +1131,12 @@ class H(BaseHTTPRequestHandler):
             sql = STATS_SQL.format(model_col="COALESCE(o.model,'')" if by_model else "''",
                                    effort_col="COALESCE(o.effort,'')" if by_model else "''",
                                    group_extra=", model, effort" if by_model else "")
-            self._json({"tools": q(sql, (tag, tag)), "total": total})
+            jrows = q("""SELECT s.tool, AVG(s.overall) avg, COUNT(s.overall) n, SUM(j.best=s.tool) best
+                         FROM judge_scores s JOIN judgments j ON j.run_id=s.run_id JOIN runs ON runs.id=s.run_id
+                         WHERE j.status='ok' AND (?='' OR runs.tag=?) GROUP BY s.tool ORDER BY avg DESC""", (tag, tag))
+            agree = q("""SELECT COUNT(*) total, SUM(runs.winner=j.best) agree FROM runs JOIN judgments j ON j.run_id=runs.id
+                         WHERE j.status='ok' AND j.best<>'' AND runs.winner<>'' AND (?='' OR runs.tag=?)""", (tag, tag), one=True)
+            self._json({"tools": q(sql, (tag, tag)), "total": total, "judge": jrows, "agree": agree})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -976,9 +1153,11 @@ class H(BaseHTTPRequestHandler):
             prompt = (b.get("prompt") or "").strip()
             if not prompt:
                 return self._json({"error": "问题为空"}, 400)
+            jflag, jmodel = bool(b.get("judge")), str(b.get("judge_model") or "")
             if b.get("parent"):
                 try:
-                    rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]))
+                    rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]),
+                                                            judge=jflag, judge_model=jmodel)
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
                 return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"]})
@@ -988,7 +1167,7 @@ class H(BaseHTTPRequestHandler):
             models = b.get("models") if isinstance(b.get("models"), dict) else {}
             efforts = b.get("efforts") if isinstance(b.get("efforts"), dict) else {}
             rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
-                                                    models, efforts)
+                                                    models, efforts, judge=jflag, judge_model=jmodel)
             self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "tag": b.get("tag") or ""})
         elif p.startswith("/api/cancel/"):
             run = RUNS.get(p.rsplit("/", 1)[1])
@@ -998,6 +1177,9 @@ class H(BaseHTTPRequestHandler):
                     if pr.poll() is None:
                         kill(pr)
             self._json({"ok": True})
+        elif p.startswith("/api/judge/"):
+            err = start_judge(p.rsplit("/", 1)[1], str(b.get("model") or ""))
+            self._json({"error": err}, 400) if err else self._json({"ok": True})
         elif p.startswith("/api/install/"):
             err = start_install(p.rsplit("/", 1)[1])
             self._json({"error": err}, 400) if err else self._json({"ok": True})
@@ -1017,7 +1199,7 @@ class H(BaseHTTPRequestHandler):
         elif p.startswith("/api/delete/"):  # 删除首问时连同整条对话一起删除
             rid = p.rsplit("/", 1)[1]
             for x in q("SELECT id FROM runs WHERE id=? OR thread=?", (rid, rid)):
-                for t in ("outputs", "ratings"):
+                for t in ("outputs", "ratings", "judgments", "judge_scores"):
                     q(f"DELETE FROM {t} WHERE run_id=?", (x["id"],))
                 q("DELETE FROM runs WHERE id=?", (x["id"],))
             self._json({"ok": True})
@@ -1204,6 +1386,18 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
 .fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
+.judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
+.judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
+.jd{padding:7px 12px 8px;font-size:12.5px;line-height:1.6;color:var(--muted);border-top:1px dashed var(--line);background:color-mix(in srgb,var(--soft) 55%,transparent)}
+.jd b{color:var(--ink);margin-right:6px}
+.jd .jx{font-size:11.5px;margin-left:6px;opacity:.85}
+.jres{font-size:12.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+.jres b{color:var(--ink)}
+.jres.err{color:var(--bad)}
+.jres .agree{color:var(--ok);margin-left:6px}
+#sjudge{margin-top:22px}
+#sjudge h3{font-size:14px;margin:0 0 10px}
 
 /* 单列 */
 .col{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--solid);overflow:hidden}
@@ -1324,6 +1518,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <div class="copts">
       <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签"><datalist id="tagList"></datalist>
       <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录">
+      <span class="judgeopt" id="judgeOpt" hidden></span>
       <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> 发送</span>
     </div>
   </div>
@@ -1342,6 +1537,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <select class="field" id="sby"><option value="">按工具</option><option value="model">按工具、模型和 effort</option></select>
     <span id="stotal" class="note-s" style="margin:0"></span></div>
   <table class="grid" id="stable"></table>
+  <div id="sjudge"></div>
   <p class="note-s">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
 </section>
 
@@ -1471,8 +1667,9 @@ function makeTurn(th,meta,idx){
   const el=r.el=document.createElement('section');el.className='turn';
   el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">第 ${idx+1} 轮</span><span class="tq"></span><span class="tsum"></span></div>
     <div class="tbody"><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
-    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button><span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
+    <div class="rfoot"><button class="btn sm ghost allfull">全部展开全文</button>${CFG.judge?`<button class="btn sm ghost jbtn">让 ${esc(tname(CFG.judge))} 评分</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">平手</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
+  if(CFG.judge)$('.jbtn',el).onclick=()=>askJudge(r);
   const h2=$('.th2',el);h2.onclick=()=>fold(r,!r.folded);
   h2.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fold(r,!r.folded)}};
   $('.tie',el).onclick=()=>setWinner(r,r.winner==='tie'?'':'tie');
@@ -1482,7 +1679,8 @@ function makeTurn(th,meta,idx){
   paintWinner(r);return r;
 }
 function fillTurn(r,d){   // 已完成的轮次直接用数据库里的结果；还在跑的才接流
-  r.winner=d.winner||'';
+  r.winner=d.winner||'';r.autoJudge=!!d.auto_judge;
+  if(d.judgment){renderJudge(r,d.judgment);if(d.judgment.running)pollJudge(r)}
   for(const x of d.ratings||[])if(r.S[x.tool]){Object.assign(r.S[x.tool],{score:x.score,note:x.note||''});$('.note',r.S[x.tool].el).value=x.note||'';paintStars(r,x.tool)}
   paintWinner(r);
   if(d.running){openStream(r);return}
@@ -1510,6 +1708,7 @@ function makeCol(r,t,parent){
   <div class="body" tabindex="0"></div><button class="more">展开全文</button>
   <div class="cf"><span class="stars">${[1,2,3,4,5].map(i=>`<button class="star" data-v="${i}" aria-label="${i} 星">★</button>`).join('')}</span>
     <input class="note" placeholder="写点备注" aria-label="${esc(tname(t))} 的备注"><button class="btn sm ghost win">最佳</button></div>
+  <div class="jd" hidden></div>
   <details class="log"><summary>过程日志<span class="cost"></span></summary><pre></pre></details>`;
   $('.raw',c).onclick=()=>{s.raw=!s.raw;paint(r,t)};
   $('.cp',c).onclick=e=>copyText(clean(s.out),e.currentTarget);
@@ -1557,7 +1756,7 @@ function openStream(r){
   const es=r.es=new EventSource(`/api/stream/${encodeURIComponent(r.id)}?token=${TOKEN}`);
   es.onopen=()=>{for(const t of r.tools){Object.assign(r.S[t],{out:'',log:'',status:'',secs:null,t0:null,actual:''});paint(r,t)}};
   es.onmessage=e=>{const ev=JSON.parse(e.data);
-    if(ev.type==='end'){es.close();r.es=null;setRunning(r,false);refreshTags();return}
+    if(ev.type==='end'){es.close();r.es=null;setRunning(r,false);refreshTags();if(r.autoJudge)pollJudge(r,true);return}
     const s=r.S[ev.tool];if(!s)return;
     if(ev.type==='start'){s.status='run';s.t0=Date.now();if(ev.model!=null)s.model=ev.model;if(ev.effort!=null)s.effort=ev.effort;setRunning(r,true);$('.ch b',s.el).title=ev.cmd||''}
     else if(ev.type==='out')s.out+=ev.data;else if(ev.type==='log')s.log+=ev.data;
@@ -1571,23 +1770,69 @@ function paintWinner(r){const w=r.winner;
   $('.tie',r.el).classList.toggle('on',w==='tie');
   $('.tsum',r.el).innerHTML=w?`<span class="chip win">${winText(w)}</span>`:'';
   if(r===lastTurn(r.th))paintHead(r.th)}
-function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+
+/* ---------- 评分（匿名交给第三方模型） ---------- */
+let JSEL={model:'',auto:false};
+function renderJudgeOpt(){
+  const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
+  const v=CFG.tools[CFG.judge],opts=[{id:'',label:v.default_label||'默认'},...(v.models||[])];
+  box.hidden=false;
+  box.innerHTML=`<label title="每轮回答完成后，自动把三份回答匿名交给 ${esc(tname(CFG.judge))} 评分"><input type="checkbox" id="jauto" ${JSEL.auto?'checked':''}>${esc(tname(CFG.judge))} 自动评分</label>
+    <select id="jmodel" aria-label="评分使用的模型">${opts.map(o=>`<option value="${esc(o.id)}"${o.id===JSEL.model?' selected':''}>${esc(o.label)}</option>`).join('')}</select>`;
+  $('#jauto').onchange=e=>{JSEL.auto=e.target.checked;ls.set('arenaJudge',JSEL)};
+  $('#jmodel').onchange=e=>{JSEL.model=e.target.value;ls.set('arenaJudge',JSEL)};
+}
+async function askJudge(r){
+  const b=$('.jbtn',r.el);b.disabled=true;
+  try{await post('/api/judge/'+encodeURIComponent(r.id),{model:JSEL.model});renderJudge(r,{status:'running',running:true});pollJudge(r)}
+  catch(e){b.disabled=false;toast(e)}
+}
+function pollJudge(r,waitStart){
+  clearTimeout(r.jt);let tries=0;
+  const tick=async()=>{tries++;
+    try{const j=await api('/api/judge/'+encodeURIComponent(r.id));renderJudge(r,j);if(j.running||j.status==='running')r.jt=setTimeout(tick,2000)}
+    catch(e){if(waitStart&&tries<8)r.jt=setTimeout(tick,1500)}};
+  r.jt=setTimeout(tick,waitStart?1200:2000);
+}
+function deanon(t,map){  // 把 Grok 点评里的匿名标签（回答 A、A 比 C）换回工具名
+  const nm=l=>map&&map[l]?tname(map[l]):null;
+  return String(t||'').replace(/回答\s*([A-H])/g,(m,l)=>nm(l)||m)
+    .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
+}
+function renderJudge(r,j){
+  r.judge=j;const name=esc(tname(CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
+  const busy=j.running||j.status==='running';
+  b.disabled=busy;b.textContent=busy?`${tname(CFG.judge)} 评分中…`:j.status==='ok'?'重新评分':j.status?'重试评分':`让 ${tname(CFG.judge)} 评分`;
+  res.classList.toggle('err',j.status==='error');res.title='';
+  for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
+  if(busy){res.innerHTML='匿名打乱后交给 '+name+' 评审中…';return}
+  if(j.status==='error'){res.textContent=`评分失败：${j.reason||'未知原因'}`;res.title=(j.raw||'').slice(-2000);return}
+  if(j.status!=='ok'){res.textContent='';return}
+  for(const x of j.scores||[]){const s=r.S[x.tool];if(!s)continue;const jd=$('.jd',s.el);jd.hidden=false;
+    const det=Object.entries(x.detail||{}).map(([k,v])=>({accuracy:'准确',completeness:'完整',clarity:'清晰',usefulness:'实用'}[k]||k)+' '+v).join('  ');
+    jd.innerHTML=`<b>${name} ${x.overall!=null?x.overall:'—'}/5</b>${esc(deanon(x.comment,j.mapping))}${det?`<span class="jx">${esc(det)}</span>`:''}`}
+  const best=j.best==='tie'?'平手':j.best?tname(j.best):'未选出';
+  const agree=r.winner&&j.best?(r.winner===j.best?'<span class="agree">和你的选择一致</span>':''):'';
+  const why=deanon(j.reason,j.mapping);res.innerHTML=`${name} 认为最佳：<b>${esc(best)}</b>${agree}${why?'。'+esc(why):''}`;res.title=why;
+}
 
 async function send(prompt,tools,models,efforts,tag,cwd){
-  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd});
+  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
     const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd};
     const th=makeRound(meta);th.built=true;
     $('#empty').hidden=true;feed.prepend(th.el);
-    const r=makeTurn(th,meta,0);setOpen(th,true);paintHead(th);openStream(r);
+    const r=makeTurn(th,meta,0);r.autoJudge=!!(CFG.judge&&JSEL.auto);setOpen(th,true);paintHead(th);openStream(r);
     window.scrollTo({top:0,behavior:'smooth'});return true}
   catch(e){toast(e);return false}
 }
 async function follow(th){
   const fq=$('.fq',th.el),p=fq.value.trim(),last=lastTurn(th);if(!p)return fq.focus();if(!last)return;
   if(th.turns.some(r=>r.running))return toast('上一轮还在生成，等它结束再追问');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id});
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
     const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:''},th.turns.length);
+    r.autoJudge=!!(CFG.judge&&JSEL.auto);
     foldOld(th);paintHead(th);openStream(r);fq.value='';fq.style.height='auto';
     r.el.scrollIntoView({behavior:'smooth',block:'start'})}
   catch(e){toast(e)}
@@ -1663,8 +1908,17 @@ async function loadStats(){
     <td>${r.n}</td><td>${pct(r.ok,r.n)}</td><td>${r.score!=null?r.score.toFixed(2)+`<span class="meter"><i style="width:${r.score/5*100}%"></i></span>`:'—'}</td>
     <td>${r.rated}</td><td>${r.wins||0}</td><td>${pct(r.wins||0,r.judged)}</td><td>${r.secs!=null?r.secs.toFixed(1)+'s':'—'}</td><td>${r.chars!=null?Math.round(r.chars):'—'}</td></tr>`).join('')
     ||'<tr><td colspan="9" style="color:var(--muted);text-align:left">还没有数据</td></tr>');
+  renderJudgeStats(d);
 }
 $('#stag').onchange=loadStats;$('#sby').onchange=loadStats;
+function renderJudgeStats(d){
+  const box=$('#sjudge');if(!CFG.judge){box.innerHTML='';return}const name=esc(tname(CFG.judge));
+  if(!(d.judge||[]).length){box.innerHTML=`<h3>${name} 评分</h3><p class="note-s" style="margin:0">还没有 ${name} 的评分。在输入区勾选「${name} 自动评分」，或在任意一轮下面点「让 ${name} 评分」。</p>`;return}
+  const a=d.agree||{};
+  box.innerHTML=`<h3>${name} 评分<span class="note-s" style="font-weight:400;margin-left:10px">${a.total?`你和 ${name} 选的最佳一致：${a.agree||0} / ${a.total}（${Math.round((a.agree||0)/a.total*100)}%）`:'你和它都选过最佳的轮次越多，一致率越有参考价值'}</span></h3>
+  <table class="grid"><tr><th>工具</th><th>${name} 平均分</th><th>评过的回答</th><th>${name} 选为最佳</th></tr>${d.judge.map(r=>`<tr><td class="tool" style="--c:${esc(color(r.tool))}"><span class="dot"></span>${esc(tname(r.tool))}</td>
+    <td>${r.avg!=null?r.avg.toFixed(2)+`<span class="meter"><i style="width:${r.avg/5*100}%"></i></span>`:'—'}</td><td>${r.n}</td><td>${r.best||0}</td></tr>`).join('')}</table>`;
+}
 
 /* ---------- 环境 ---------- */
 let jobT=0;
@@ -1675,7 +1929,7 @@ async function loadEnv(){
   $('#etable').innerHTML='<tr><th>工具</th><th>状态</th><th>版本</th><th>位置</th><th>操作</th></tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">登录</button><div class="hint">${esc(t.hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?'安装中…':'一键安装'}</button>`:'—');
-    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
+    return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?'<small>评分</small>':''}</td>
       <td><span class="state ${t.path?'ok':'bad'}">${t.path?'已安装':'没找到'}</span></td><td>${esc(t.version||'—')}</td>
       <td class="path">${esc(t.path||'没找到 '+t.exe)}</td><td>${act}</td></tr>`}).join('');
   $('#epath').textContent=d.path.split(':').join('\n');renderJobs(d.jobs);
@@ -1706,7 +1960,8 @@ $('#quit').onclick=()=>{if(!confirm('关闭 AI Arena 后台服务？正在进行
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
-  renderLanes();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
+  JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
+  renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>
 """
