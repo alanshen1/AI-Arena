@@ -64,7 +64,6 @@ DEFAULT_CFG = {
             "models_cmd": ["agy", "models"], "models": []},
         "grok": {"role": "judge",  # 评分模型，不参赛
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
-                 "pty": True,  # 用伪终端运行，避免 CLI 在非终端环境下不输出
                  "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
                  "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号", "hint_en": "A browser opens; sign in with your xAI / X account",
                  "model_flag": "-m", "default_label": "默认", "default_label_en": "Default",
