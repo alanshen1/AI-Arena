@@ -556,37 +556,82 @@ class CodexJson(LineParser):
         return []
 
 
+def deep_find(o, keys, depth=0):
+    """在嵌套的 dict / list 里找第一个非空字符串字段。"""
+    if depth > 6:
+        return ""
+    if isinstance(o, dict):
+        for k in keys:
+            v = o.get(k)
+            if isinstance(v, str) and v.strip():
+                return v
+        for v in o.values():
+            r = deep_find(v, keys, depth + 1)
+            if r:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = deep_find(v, keys, depth + 1)
+            if r:
+                return r
+    return ""
+
+
 class AgyStream(LineParser):
-    """解析 `agy -p … --output-format stream-json` 的 NDJSON（init / step_update / result）。"""
+    """解析 `agy -p … --output-format stream-json` 的 NDJSON（init / step_update / result）。
+    字段位置按文档优先，找不到时在整条事件里递归查找；仍没解析出文字时，把原始输出写进过程日志。"""
 
     def __init__(self):
         super().__init__()
-        self.got = False
+        self.got, self.raw, self.out_any = False, [], False
+
+    def _line(self, line):
+        if line.strip() and len(self.raw) < 200:
+            self.raw.append(line.strip()[:1500])
+        res = super()._line(line)
+        if any(k == "out" and v for k, v in res):
+            self.out_any = True
+        return res
+
+    def flush(self):
+        res = super().flush()
+        if any(k == "out" and v for k, v in res):
+            self.out_any = True
+        if not self.out_any and self.raw:
+            res.append(("log", "[原始输出] 没能从 agy 的输出里解析出回答，原始内容如下：\n" + "\n".join(self.raw[:120]) + "\n"))
+        return res
 
     def event(self, o):
-        ev = o.get("event") or o.get("type")
+        ev = str(o.get("event") or o.get("type") or o.get("kind") or "")
         d = o.get("data") if isinstance(o.get("data"), dict) else o
         res = []
-        cid = d.get("conversation_id") or o.get("conversation_id")
+        cid = deep_find(o, ("conversation_id", "conversationId"))
         if cid:
-            res.append(("session", str(cid)))
+            res.append(("session", cid))
         if ev == "init":
-            model = d.get("model") or (d.get("config") or {}).get("model") if isinstance(d.get("config"), dict) else d.get("model")
+            model = deep_find(o, ("model", "model_name", "modelName"))
             if model:
-                res.append(("meta", str(model)))
+                res.append(("meta", model))
         elif ev == "step_update":
-            if d.get("step_type") == "agent_response" and d.get("text_delta"):
+            blob = json.dumps(o, ensure_ascii=False)
+            is_answer = d.get("step_type") == "agent_response" or "agent_response" in blob or "AGENT_RESPONSE" in blob
+            delta = deep_find(o, ("text_delta", "textDelta", "delta"))
+            if is_answer and delta:
                 self.got = True
-                res.append(("out", d["text_delta"]))
+                res.append(("out", delta))
             elif d.get("step_type") and d.get("status") == "DONE":
                 res.append(("log", f"[步骤] {d.get('step_type')}\n"))
         elif ev == "result":
-            if not self.got and d.get("response"):
-                res.append(("out", d["response"]))
-            if d.get("status") and d.get("status") != "SUCCESS":
-                res.append(("log", f"[状态] {d.get('status')} {d.get('error') or ''}\n"))
-            if d.get("usage"):
-                res.append(("log", f"[用量] {json.dumps(d['usage'], ensure_ascii=False)}\n"))
+            if not self.got:
+                resp = deep_find(o, ("response", "text", "content", "output", "answer", "message"))
+                if resp:
+                    res.append(("out", resp))
+            status = deep_find(o, ("status",))
+            if status and status.upper() != "SUCCESS":
+                res.append(("log", f"[状态] {status} {deep_find(o, ('error',))}\n"))
+            usage = o.get("usage") or d.get("usage")
+            if usage:
+                res.append(("log", f"[用量] {json.dumps(usage, ensure_ascii=False)}\n"))
         return res
 
 
