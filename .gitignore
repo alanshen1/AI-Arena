@@ -1,0 +1,8 @@
+# 运行时生成的本地数据（不提交）
+arena.db
+arena.db-*
+arena.log
+arena_config.json
+__pycache__/
+.DS_Store
+_to_delete/
