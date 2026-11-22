@@ -26,7 +26,7 @@ LAST_SEEN = time.time()
 SRV = None
 
 DEFAULT_CFG = {
-    "version": 3,
+    "version": 4,
     "judge_timeout": 300,
     "timeout": 600,
     "tools": {
@@ -117,6 +117,7 @@ MSG = {
     "judge_exit": ("{label} 退出码 {code}", "{label} exited with code {code}"),
     "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
     "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
+    "chat_note": ("[聊天模式] 已要求像通用助手那样完整作答\n", "[chat mode] Asked to answer like a general-purpose assistant\n"),
     "judge_interrupted": ("评分被中断（后台服务重启过），可以重试", "Scoring was interrupted (the background service restarted). Try again."),
     "judge_timeout_tail": ("{label} 超过 {sec} 秒没有完成。最后的输出：{tail}", "{label} did not finish within {sec} seconds. Last output: {tail}"),
     "judge_no_output": ("（没有任何输出）", "(no output at all)"),
@@ -160,6 +161,24 @@ def load_cfg():
         tools.setdefault("grok", copy.deepcopy(DEFAULT_CFG["tools"]["grok"]))
         cfg.setdefault("judge_timeout", DEFAULT_CFG["judge_timeout"])
         cfg["version"] = 3
+        CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    if cfg.get("version", 1) < 4:  # v4：Codex 命令里写死的 effort 会盖过「默认」，且纯文本输出拿不到会话 ID
+        sp = tools.get("codex")
+        if sp and sp.get("parser") == "raw" and sp.get("cmd", [])[:2] == ["codex", "exec"]:
+            cmd, rest, i = sp["cmd"], [], 0
+            while i < len(cmd):
+                if cmd[i] in ("-c", "--config") and i + 1 < len(cmd) and cmd[i + 1].startswith("model_reasoning_effort="):
+                    i += 2
+                    continue
+                rest.append(cmd[i])
+                i += 1
+            if rest == ["codex", "exec", "--skip-git-repo-check", "{prompt}"]:
+                backup = CFG_PATH.with_name(CFG_PATH.stem + ".backup-v3.json")
+                if not backup.exists():
+                    backup.write_text(CFG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+                sp["cmd"] = list(DEFAULT_CFG["tools"]["codex"]["cmd"])
+                sp["parser"] = DEFAULT_CFG["tools"]["codex"]["parser"]
+        cfg["version"] = 4
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     for name, spec in tools.items():  # 旧配置补上新字段
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
@@ -453,7 +472,7 @@ def open_login(tool, lang="zh"):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
   tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
-  thread TEXT DEFAULT '', parent TEXT DEFAULT '');
+  thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds REAL, output TEXT,
   log TEXT, cmd TEXT, model TEXT DEFAULT '', actual_model TEXT DEFAULT '', effort TEXT DEFAULT '',
   session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
@@ -473,6 +492,8 @@ def migrate(c):  # 旧数据库补列
                        ("outputs", "session")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+    if "chat" not in [r[1] for r in c.execute("PRAGMA table_info(runs)")]:
+        c.execute("ALTER TABLE runs ADD COLUMN chat INTEGER DEFAULT 0")
     c.commit()
 
 
@@ -712,6 +733,17 @@ class AgyStream(LineParser):
 PARSERS = {"claude_stream": lambda lang="zh": ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
 
 
+CHAT_PREFIX = {
+    "zh": ("请像通用 AI 助手（而不是编程助手）那样回答下面的问题：给出完整、有结构、可以直接照着做的回答，"
+           "包括具体做法、数字或例子；需要时用标题、列表或表格。不要读写本地文件，也不要执行命令，除非问题确实需要。"
+           "用提问所用的语言回答。\n\n问题：\n"),
+    "en": ("Answer the question below the way a general-purpose AI assistant would, not as a coding agent: give a complete, "
+           "well-structured answer the person can act on, with concrete steps, numbers or examples; use headings, lists or "
+           "tables where they help. Do not read or write local files or run commands unless the question really needs it. "
+           "Answer in the language of the question.\n\nQuestion:\n"),
+}
+
+
 def build_transcript(history, prompt, lang="zh"):
     en = lang == "en"
     parts = ["Below is our conversation so far. Answer the new question at the end with it in mind.\n" if en
@@ -739,7 +771,7 @@ def kill(p):
 MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # 如 Codex 在 stderr 打印的 "model: gpt-…"
 
 
-def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None):
+def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False):
     base, extra, note = list(spec["cmd"]), [], ""
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
@@ -762,6 +794,9 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     elif history:
         prompt = build_transcript(history, prompt, lang)
         note = M(lang, "resume_transcript", n=len(history))
+    if chat:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
+        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + prompt
+        note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     shown = " ".join(shlex.quote(a) for a in base)
     out, log, t0, status = [], [], time.time(), "ok"
@@ -1128,7 +1163,8 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
     return rc, "".join(buf), "".join(err)
 
 
-def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh"):
+def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh",
+              chat=False):
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories = "", "", {}, {}
@@ -1140,7 +1176,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         tools = json.loads(p["tools"] or "[]")
         models, efforts = json.loads(p.get("models") or "{}"), json.loads(p.get("efforts") or "{}")
-        cwd, tag = p.get("cwd") or None, p.get("tag") or ""
+        cwd, tag, chat = p.get("cwd") or None, p.get("tag") or "", bool(p.get("chat"))
         for t in tools:
             rows = q("""SELECT r.prompt, o.output, o.session, o.status FROM runs r
                         LEFT JOIN outputs o ON o.run_id=r.id AND o.tool=?
@@ -1155,16 +1191,17 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     models = {t: str((models or {}).get(t) or "").strip() for t in tools}
     efforts = {t: e if re.fullmatch(r"[a-z]{1,12}", e := str((efforts or {}).get(t) or "").strip()) else ""
                for t in tools}
-    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
-                                        json.dumps(models), json.dumps(efforts), thread or rid, parent_id))
+    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
+                                          json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat))))
     run = Run(rid, tools)
     run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
     for t in tools:
         threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, cwd, cfg.get("timeout", 600),
                                                  models[t], efforts[t], sessions.get(t, ""),
-                                                 None if sessions.get(t) else histories.get(t)), daemon=True).start()
+                                                 None if sessions.get(t) else histories.get(t), bool(chat)),
+                         daemon=True).start()
     return rid, tools, models, efforts
 
 
@@ -1274,7 +1311,7 @@ class H(BaseHTTPRequestHandler):
         elif p == "/api/history":
             kw, tag = qs.get("q", ""), qs.get("tag", "")
             limit = max(1, min(int(qs.get("limit") or 200), 500))
-            rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd,
+            rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd, chat,
                  (SELECT group_concat(tool||' '||score, '，') FROM ratings r WHERE r.run_id=runs.id AND score>0) scores,
                  (SELECT COUNT(*) FROM runs c WHERE c.thread=runs.id) nturns,
                  (SELECT c.winner FROM runs c WHERE c.id=runs.id OR c.thread=runs.id ORDER BY c.created_at DESC LIMIT 1) last_winner,
@@ -1314,7 +1351,7 @@ class H(BaseHTTPRequestHandler):
             prompt = (b.get("prompt") or "").strip()
             if not prompt:
                 return self._json({"error": M(self.lang, "empty_prompt")}, 400)
-            jflag, jmodel = bool(b.get("judge")), str(b.get("judge_model") or "")
+            jflag, jmodel, chat = bool(b.get("judge")), str(b.get("judge_model") or ""), bool(b.get("chat"))
             if b.get("parent"):
                 try:
                     rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]),
@@ -1328,8 +1365,10 @@ class H(BaseHTTPRequestHandler):
             models = b.get("models") if isinstance(b.get("models"), dict) else {}
             efforts = b.get("efforts") if isinstance(b.get("efforts"), dict) else {}
             rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
-                                                    models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang)
-            self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "tag": b.get("tag") or ""})
+                                                    models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang,
+                                                    chat=chat)
+            self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "tag": b.get("tag") or "",
+                        "chat": chat})
         elif p.startswith("/api/cancel/"):
             run = RUNS.get(p.rsplit("/", 1)[1])
             if run:
@@ -1550,6 +1589,8 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
 .fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.chatopt{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent);color:var(--ink);cursor:pointer;white-space:nowrap}
+.chip.chat{background:color-mix(in srgb,var(--focus) 12%,transparent);color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
 .judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
@@ -1686,6 +1727,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <div class="copts">
       <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
       <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
+      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">聊天模式</span></label>
       <span class="judgeopt" id="judgeOpt" hidden></span>
       <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">发送</span></span>
     </div>
@@ -1775,7 +1817,8 @@ const I18N={zh:{
  'e.tool':'工具','e.status':'状态','e.ver':'版本','e.path':'位置','e.act':'操作','e.login':'登录','e.installing':'安装中…','e.install':'一键安装','e.judge':'评分',
  'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
  'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
- 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。'
+ 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。',
+ 'chat.label':'聊天模式','chat.title':'让所有工具都像通用助手（而不是编程助手）那样完整作答：给出有结构、可以照着做的回答。追问会沿用这个设置。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
  'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
@@ -1809,7 +1852,8 @@ const I18N={zh:{
  'e.tool':'Tool','e.status':'Status','e.ver':'Version','e.path':'Location','e.act':'Action','e.login':'Sign in','e.installing':'Installing…','e.install':'Install','e.judge':'judge',
  'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
  'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
- 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.'
+ 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.',
+ 'chat.label':'Chat mode','chat.title':'Ask every tool to answer like a general-purpose assistant rather than a coding agent, with complete, structured answers you can act on. Follow-ups keep this setting.','chat.chip':'Chat mode'
 }};
 const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
 let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
@@ -1883,7 +1927,7 @@ function makeRound(meta){
   el.innerHTML=`<header class="rh" tabindex="0" aria-expanded="false">
     <span class="chev">${svg(I.chev)}</span><span class="rq"></span>
     <span class="lanebar" aria-hidden="true">${th.tools.map(t=>`<i data-t="${esc(t)}" style="--c:${esc(color(t))}"></i>`).join('')}</span>
-    <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="tagc"></span><time></time></span>
+    <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="chatc"></span><span class="tagc"></span><time></time></span>
     <span class="ract"><button class="btn sm stop" hidden>${T('stop')}</button><button class="btn sm ghost rerun" title="${esc(T('rerun.title'))}">${T('rerun')}</button></span>
   </header>
   <div class="rbody" hidden><div class="turns"></div>
@@ -1891,13 +1935,14 @@ function makeRound(meta){
     <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
+  if(+meta.chat)$('.chatc',el).innerHTML=`<span class="chip chat">${T('chat.chip')}</span>`;
   (meta.st||'').split('|').filter(Boolean).forEach(x=>{const i=x.indexOf(':'),seg=$(`.lanebar i[data-t="${CSS.escape(x.slice(0,i))}"]`,el);if(seg)seg.className=segCls(x.slice(i+1))});
   const w=meta.last_winner??meta.winner;if(w)$('.winc',el).innerHTML=`<span class="chip win">${winText(w)}</span>`;
   if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${T('rounds',meta.nturns)}</span>`;
   const rh=$('.rh',el);
   rh.onclick=e=>{if(!e.target.closest('button'))setOpen(th,!th.open)};
   rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(th,!th.open)}};
-  $('.rerun',el).onclick=()=>send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'');
+  $('.rerun',el).onclick=()=>{const keep=CHAT;CHAT=!!+meta.chat;send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'').finally(()=>CHAT=keep)};
   $('.stop',el).onclick=()=>th.turns.filter(r=>r.running).forEach(r=>post('/api/cancel/'+encodeURIComponent(r.id)).catch(toast));
   const fq=$('.fq',el);
   fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
@@ -2026,7 +2071,7 @@ function paintWinner(r){const w=r.winner;
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
 /* ---------- 评分（匿名交给第三方模型） ---------- */
-let JSEL={model:'',auto:false};
+let JSEL={model:'',auto:false},CHAT=true;
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
   const v=CFG.tools[CFG.judge],opts=[{id:'',label:dlabel(CFG.judge)},...(v.models||[])];
@@ -2073,9 +2118,9 @@ function renderJudge(r,j){
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd){
-  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
+  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
-    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd};
+    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0};
     const th=makeRound(meta);th.built=true;
     $('#empty').hidden=true;feed.prepend(th.el);
     const r=makeTurn(th,meta,0);r.autoJudge=!!(CFG.judge&&JSEL.auto);setOpen(th,true);paintHead(th);openStream(r);
@@ -2218,6 +2263,8 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
+  CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
+  $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>

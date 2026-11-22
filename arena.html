@@ -143,6 +143,8 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
 .fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.chatopt{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent);color:var(--ink);cursor:pointer;white-space:nowrap}
+.chip.chat{background:color-mix(in srgb,var(--focus) 12%,transparent);color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
 .judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
@@ -279,6 +281,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <div class="copts">
       <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
       <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
+      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">聊天模式</span></label>
       <span class="judgeopt" id="judgeOpt" hidden></span>
       <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">发送</span></span>
     </div>
@@ -368,7 +371,8 @@ const I18N={zh:{
  'e.tool':'工具','e.status':'状态','e.ver':'版本','e.path':'位置','e.act':'操作','e.login':'登录','e.installing':'安装中…','e.install':'一键安装','e.judge':'评分',
  'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
  'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
- 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。'
+ 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。',
+ 'chat.label':'聊天模式','chat.title':'让所有工具都像通用助手（而不是编程助手）那样完整作答：给出有结构、可以照着做的回答。追问会沿用这个设置。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
  'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
@@ -402,7 +406,8 @@ const I18N={zh:{
  'e.tool':'Tool','e.status':'Status','e.ver':'Version','e.path':'Location','e.act':'Action','e.login':'Sign in','e.installing':'Installing…','e.install':'Install','e.judge':'judge',
  'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
  'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
- 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.'
+ 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.',
+ 'chat.label':'Chat mode','chat.title':'Ask every tool to answer like a general-purpose assistant rather than a coding agent, with complete, structured answers you can act on. Follow-ups keep this setting.','chat.chip':'Chat mode'
 }};
 const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
 let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
@@ -476,7 +481,7 @@ function makeRound(meta){
   el.innerHTML=`<header class="rh" tabindex="0" aria-expanded="false">
     <span class="chev">${svg(I.chev)}</span><span class="rq"></span>
     <span class="lanebar" aria-hidden="true">${th.tools.map(t=>`<i data-t="${esc(t)}" style="--c:${esc(color(t))}"></i>`).join('')}</span>
-    <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="tagc"></span><time></time></span>
+    <span class="rmeta"><span class="nturn"></span><span class="winc"></span><span class="chatc"></span><span class="tagc"></span><time></time></span>
     <span class="ract"><button class="btn sm stop" hidden>${T('stop')}</button><button class="btn sm ghost rerun" title="${esc(T('rerun.title'))}">${T('rerun')}</button></span>
   </header>
   <div class="rbody" hidden><div class="turns"></div>
@@ -484,13 +489,14 @@ function makeRound(meta){
     <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
+  if(+meta.chat)$('.chatc',el).innerHTML=`<span class="chip chat">${T('chat.chip')}</span>`;
   (meta.st||'').split('|').filter(Boolean).forEach(x=>{const i=x.indexOf(':'),seg=$(`.lanebar i[data-t="${CSS.escape(x.slice(0,i))}"]`,el);if(seg)seg.className=segCls(x.slice(i+1))});
   const w=meta.last_winner??meta.winner;if(w)$('.winc',el).innerHTML=`<span class="chip win">${winText(w)}</span>`;
   if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${T('rounds',meta.nturns)}</span>`;
   const rh=$('.rh',el);
   rh.onclick=e=>{if(!e.target.closest('button'))setOpen(th,!th.open)};
   rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(th,!th.open)}};
-  $('.rerun',el).onclick=()=>send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'');
+  $('.rerun',el).onclick=()=>{const keep=CHAT;CHAT=!!+meta.chat;send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'').finally(()=>CHAT=keep)};
   $('.stop',el).onclick=()=>th.turns.filter(r=>r.running).forEach(r=>post('/api/cancel/'+encodeURIComponent(r.id)).catch(toast));
   const fq=$('.fq',el);
   fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
@@ -619,7 +625,7 @@ function paintWinner(r){const w=r.winner;
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
 /* ---------- 评分（匿名交给第三方模型） ---------- */
-let JSEL={model:'',auto:false};
+let JSEL={model:'',auto:false},CHAT=true;
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
   const v=CFG.tools[CFG.judge],opts=[{id:'',label:dlabel(CFG.judge)},...(v.models||[])];
@@ -666,9 +672,9 @@ function renderJudge(r,j){
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd){
-  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
+  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
-    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd};
+    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0};
     const th=makeRound(meta);th.built=true;
     $('#empty').hidden=true;feed.prepend(th.el);
     const r=makeTurn(th,meta,0);r.autoJudge=!!(CFG.judge&&JSEL.auto);setOpen(th,true);paintHead(th);openStream(r);
@@ -811,6 +817,8 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
+  CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
+  $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>

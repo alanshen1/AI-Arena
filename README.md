@@ -9,6 +9,7 @@ AI Arena runs locally as a single Python file with no dependencies beyond the st
 ## Features
 
 - **Side-by-side streaming**: answers stream into three columns, each showing the model actually used, elapsed time and status. Switch between formatted Markdown and raw text.
+- **Chat mode** (on by default): all three tools are coding agents whose built-in instructions favor short answers. Chat mode adds the same instruction to every tool, asking it to answer like a general-purpose assistant with a complete, structured answer. Your question is stored as typed, and follow-ups keep the setting.
 - **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered.
 - **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If a tool has no session ID from the last round, the earlier Q&A is added before the question instead.
 - **Conversation feed**: each card is a conversation. Older rounds fold automatically, and a three-color bar on each card shows how each tool did in the latest round.
@@ -94,6 +95,7 @@ Created on first run and excluded by `.gitignore`:
 | Symptom | What to do |
 |---|---|
 | A column says **Not installed** | Open **Setup**, click **Install**, then **Sign in**. If the tool is installed somewhere unusual, put its full path in `arena_config.json`. |
+| Answers are much shorter than in the ChatGPT, Claude or Gemini apps | The CLIs are coding agents tuned for brevity, and the apps also use your personal memory. Turn on **Chat mode**. |
 | Codex stays on **Generating** for a long time | Codex waits instead of failing when you are not signed in. Click **Sign in** for Codex on the Setup page. |
 | An answer column is empty but marked **Done** | Open its **Process log**. If the output format was not recognized, the raw output is written there. |
 | Grok scoring takes minutes | This is normal; Grok verifies facts before it answers. To save time and quota, turn off auto-score and click **Ask Grok to score** only on rounds you care about, or pick a faster model next to the auto-score switch. |
