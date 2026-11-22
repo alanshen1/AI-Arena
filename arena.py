@@ -64,6 +64,7 @@ DEFAULT_CFG = {
             "models_cmd": ["agy", "models"], "models": []},
         "grok": {"role": "judge",  # 评分模型，不参赛
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
+                 "pty": True,  # 用伪终端运行，避免 CLI 在非终端环境下不输出
                  "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
                  "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号", "hint_en": "A browser opens; sign in with your xAI / X account",
                  "model_flag": "-m", "default_label": "默认", "default_label_en": "Default",
@@ -117,6 +118,9 @@ MSG = {
     "judge_exit": ("{label} 退出码 {code}", "{label} exited with code {code}"),
     "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
     "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
+    "judge_interrupted": ("评分被中断（后台服务重启过），可以重试", "Scoring was interrupted (the background service restarted). Try again."),
+    "judge_timeout_tail": ("{label} 超过 {sec} 秒没有完成。最后的输出：{tail}", "{label} did not finish within {sec} seconds. Last output: {tail}"),
+    "judge_no_output": ("（没有任何输出）", "(no output at all)"),
     "parent_missing": ("要追问的那一轮不存在", "The round you are following up on does not exist"),
     "bad_token": ("token 无效，请刷新页面", "Invalid token. Reload the page."),
     "no_judgment": ("还没有评分", "Not scored yet"), "empty_prompt": ("问题为空", "The question is empty"),
@@ -964,7 +968,7 @@ def parse_judge(text):
     return None
 
 
-def judgment(rid):
+def judgment(rid, lang="zh"):
     j = q("SELECT * FROM judgments WHERE run_id=?", (rid,), one=True)
     if j:
         j["mapping"] = json.loads(j.get("mapping") or "{}")
@@ -973,6 +977,9 @@ def judgment(rid):
         for x in j["scores"]:
             x["detail"] = json.loads(x["detail"] or "{}")
         j["running"] = rid in JUDGING
+        if j["status"] == "running" and not j["running"]:
+            j["status"], j["reason"] = "error", M(lang, "judge_interrupted")
+        j["elapsed"] = round(time.time() - (j.get("created_at") or time.time()), 1)
     return j
 
 
@@ -1017,13 +1024,23 @@ def start_judge(rid, model="", lang="zh"):
             base[i:i] = [spec["model_flag"], model]
         cmd = [prompt if a == "{prompt}" else a for a in base]
         status, best, reason, result, raw = "error", "", "", {}, ""
+        last = [0.0]
+
+        def progress(text):  # 每 2 秒把已有输出存一次，页面可以看到进度
+            if time.time() - last[0] > 2:
+                last[0] = time.time()
+                q("UPDATE judgments SET raw=?, seconds=? WHERE run_id=?", (text[-20000:], round(time.time() - t0, 1), rid))
+
         try:
-            r = subprocess.run([exe] + cmd[1:], capture_output=True, text=True, timeout=cfg.get("judge_timeout", 300),
-                               env=child_env(), stdin=subprocess.DEVNULL, cwd=tempfile.mkdtemp(prefix="arena-judge-"))
-            raw = (r.stdout or "") + ("\n[stderr]\n" + r.stderr if r.stderr.strip() else "")
-            o = parse_judge(r.stdout) if r.returncode == 0 else None
-            if not o:
-                reason = M(lang, "judge_exit", label=label, code=r.returncode) if r.returncode else M(lang, "judge_parse", label=label)
+            sec = cfg.get("judge_timeout", 300)
+            rc, out, err = run_streaming(exe, cmd[1:], spec, tempfile.mkdtemp(prefix="arena-judge-"), sec, progress)
+            raw = out + ("\n[stderr]\n" + err if err.strip() else "")
+            o = parse_judge(out) if rc == 0 else None
+            if rc is None:
+                tail = ANSI_RE.sub("", raw).strip()[-300:] or M(lang, "judge_no_output")
+                reason = M(lang, "judge_timeout_tail", label=label, sec=sec, tail=tail)
+            elif not o:
+                reason = M(lang, "judge_exit", label=label, code=rc) if rc else M(lang, "judge_parse", label=label)
             else:
                 rows = []
                 for lab, tool in mapping.items():
@@ -1039,8 +1056,6 @@ def start_judge(rid, model="", lang="zh"):
                 reason, result, status = str(o.get("reason") or ""), o, "ok"
                 for row in rows:
                     q("INSERT OR REPLACE INTO judge_scores(run_id, tool, overall, detail, comment) VALUES(?,?,?,?,?)", row)
-        except subprocess.TimeoutExpired:
-            reason = M(lang, "judge_timeout", label=label, sec=cfg.get('judge_timeout', 300))
         except Exception as e:
             reason = str(e)
         q("UPDATE judgments SET status=?, best=?, reason=?, result=?, raw=?, seconds=? WHERE run_id=?",
@@ -1049,6 +1064,69 @@ def start_judge(rid, model="", lang="zh"):
 
     threading.Thread(target=work, daemon=True).start()
     return ""
+
+
+def run_streaming(exe, args, spec, cwd, timeout, on_text):
+    """运行一个 CLI，边读边回调 on_text(累计输出)。返回 (退出码或 None=超时, 输出, stderr)。"""
+    env = child_env()
+    use_pty = bool(spec.get("pty")) and os.name == "posix"
+    buf, err, out_fd = [], [], None
+    if use_pty:
+        import pty, termios, fcntl, struct
+        out_fd, slave = pty.openpty()
+        attrs = termios.tcgetattr(slave)
+        attrs[1] &= ~termios.OPOST
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 200, 400, 0, 0))
+        env["TERM"] = "dumb"
+        try:
+            p = subprocess.Popen([exe] + args, stdout=slave, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                                 cwd=cwd, env=env, start_new_session=True)
+        finally:
+            os.close(slave)
+    else:
+        p = subprocess.Popen([exe] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                             cwd=cwd, env=env, start_new_session=(os.name == "posix"))
+        out_fd = p.stdout.fileno()
+    ptx = PtyText() if use_pty else None
+
+    def pump_out():
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        while True:
+            try:
+                b = os.read(out_fd, 4096)
+            except OSError:
+                b = b""
+            t = dec.decode(b, final=not b)
+            if ptx:
+                t = ptx.feed(t) + ("" if b else ptx.flush())
+            if t:
+                buf.append(t)
+                on_text("".join(buf))
+            if not b:
+                break
+
+    def pump_err():
+        for chunk in iter(lambda: p.stderr.read(4096), b""):
+            err.append(chunk.decode("utf-8", "replace"))
+
+    ths = [threading.Thread(target=pump_out, daemon=True), threading.Thread(target=pump_err, daemon=True)]
+    for th in ths:
+        th.start()
+    rc = None
+    try:
+        rc = p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill(p)
+        p.wait()
+    for th in ths:
+        th.join(5)
+    if use_pty:
+        try:
+            os.close(out_fd)
+        except OSError:
+            pass
+    return rc, "".join(buf), "".join(err)
 
 
 def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh"):
@@ -1091,7 +1169,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     return rid, tools, models, efforts
 
 
-def run_detail(rid, with_turns=True):
+def run_detail(rid, with_turns=True, lang="zh"):
     r = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
     if not r:
         return None
@@ -1102,12 +1180,12 @@ def run_detail(rid, with_turns=True):
     r["ratings"] = q("SELECT tool, score, note FROM ratings WHERE run_id=?", (rid,))
     live = RUNS.get(rid)
     r["running"] = bool(live and not live.finished_at)
-    r["judgment"] = judgment(rid)
+    r["judgment"] = judgment(rid, lang)
     r["auto_judge"] = bool(live and live.judge)
     if with_turns:
         root = r.get("thread") or rid
         ids = [x["id"] for x in q("SELECT id FROM runs WHERE id=? OR thread=? ORDER BY created_at", (root, root))]
-        r["turns"] = [run_detail(i, False) if i != rid else {k: v for k, v in r.items() if k != "turns"} for i in ids]
+        r["turns"] = [run_detail(i, False, lang) if i != rid else {k: v for k, v in r.items() if k != "turns"} for i in ids]
     return r
 
 
@@ -1171,7 +1249,7 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif p.startswith("/api/judge/"):
-            j = judgment(p.rsplit("/", 1)[1])
+            j = judgment(p.rsplit("/", 1)[1], self.lang)
             self._json(j) if j else self._json({"error": M(self.lang, "no_judgment")}, 404)
         elif p == "/api/doctor":
             self._json(doctor(self.lang))
@@ -1192,7 +1270,7 @@ class H(BaseHTTPRequestHandler):
         elif p.startswith("/api/stream/"):
             self._sse(p.rsplit("/", 1)[1])
         elif p.startswith("/api/run/"):
-            d = run_detail(p.rsplit("/", 1)[1])
+            d = run_detail(p.rsplit("/", 1)[1], True, self.lang)
             self._json(d) if d else self._json({"error": "not found"}, 404)
         elif p == "/api/history":
             kw, tag = qs.get("q", ""), qs.get("tag", "")
@@ -1684,7 +1762,7 @@ const I18N={zh:{
  'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
  'copy':'复制','copied':'已复制','m.actual':'实际使用：{0}','m.chosen':'（选择的是 {0}）','m.model':'模型：{0}','m.effort':'Effort：{0}','cost':'　约 ${0}',
  'j.autoTitle':'每轮回答完成后，自动把回答匿名交给 {0} 评分','j.auto':'{0} 自动评分','j.modelAria':'评分使用的模型',
- 'j.ask':'让 {0} 评分','j.busy':'{0} 评分中…','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
+ 'j.ask':'让 {0} 评分','j.busy':'{0} 评分中…','j.elapsed':'已 {0} 秒','j.last':'最新输出：{0}','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
  'j.fail':'评分失败：{0}','j.unknown':'未知原因','j.none':'未选出','j.agree':'和你的选择一致','j.best':'{0} 认为最佳：','j.sep':'。',
  'k.accuracy':'准确','k.completeness':'完整','k.clarity':'清晰','k.usefulness':'实用',
  't.busy':'上一轮还在生成，等它结束再追问','t.pickTool':'至少选中一个工具',
@@ -1718,7 +1796,7 @@ const I18N={zh:{
  'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
  'copy':'Copy','copied':'Copied','m.actual':'Actual model: {0}','m.chosen':' (selected: {0})','m.model':'Model: {0}','m.effort':'Effort: {0}','cost':'   ≈ ${0}',
  'j.autoTitle':'After each round, send the answers anonymously to {0} for scoring','j.auto':'{0} auto-score','j.modelAria':'Scoring model',
- 'j.ask':'Ask {0} to score','j.busy':'{0} is scoring…','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
+ 'j.ask':'Ask {0} to score','j.busy':'{0} is scoring…','j.elapsed':'{0}s so far','j.last':'Latest output: {0}','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
  'j.fail':'Scoring failed: {0}','j.unknown':'unknown reason','j.none':'none','j.agree':'matches your pick','j.best':'{0} picks as best: ','j.sep':'. ',
  'k.accuracy':'Accuracy','k.completeness':'Completeness','k.clarity':'Clarity','k.usefulness':'Usefulness',
  't.busy':'The last round is still running. Wait for it to finish before following up.','t.pickTool':'Select at least one tool',
@@ -1981,7 +2059,9 @@ function renderJudge(r,j){
   b.disabled=busy;b.textContent=busy?T('j.busy',tname(CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
   res.classList.toggle('err',j.status==='error');res.title='';
   for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
-  if(busy){res.textContent=T('j.sending',tname(CFG.judge||'grok'));return}
+  if(busy){const tail=clean(j.raw||'').trim().split('\n').filter(Boolean).pop()||'';
+    res.textContent=T('j.sending',tname(CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
+    res.title=tail?T('j.last',tail.slice(-300)):'';return}
   if(j.status==='error'){res.textContent=T('j.fail',j.reason||T('j.unknown'));res.title=(j.raw||'').slice(-2000);return}
   if(j.status!=='ok'){res.textContent='';return}
   for(const x of j.scores||[]){const s=r.S[x.tool];if(!s)continue;const jd=$('.jd',s.el);jd.hidden=false;
