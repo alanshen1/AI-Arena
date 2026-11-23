@@ -1260,10 +1260,21 @@ def build_judge_prompt(question, earlier, answers, lang="zh"):
               "- usefulness 实用性：对提问者是否真正有帮助",
               "- overall 总分 1 到 5：综合判断，不是简单平均",
               "",
+              "另外请找出这几份回答的共识和分歧：",
+              "- consensus：几份回答都同意的关键结论，最多 5 条，每条一句话。",
+              "- conflicts：回答之间实质性的分歧，最多 6 条。只列内容上的分歧（事实、数字、结论、建议、做法），"
+              "不要列措辞、篇幅或排版上的差异。没有分歧就给空数组。每条包括：",
+              "  - topic：分歧点，一句话。",
+              "  - kind：fact（事实或数字冲突，至少有一方是错的）、advice（建议或做法不同）、emphasis（侧重或取舍不同）三选一。",
+              "  - positions：每份回答在这一点上的说法，各用一句话概括；没提到就写“未提及”。",
+              "  - verdict：哪种说法更可信、为什么；如果你也无法确定，就说明应该怎么核实。",
+              "",
               "只输出一个 JSON 对象，不要输出任何其他文字。格式：",
               '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"一句中文点评"}},'
-              '"best":"A","reason":"一两句中文，说明为什么选它"}',
-              'scores 里要包含每一份回答。如果难分高下，best 填 "tie"。']
+              '"best":"A","reason":"一两句中文，说明为什么选它",'
+              '"consensus":["一句话"],'
+              '"conflicts":[{"topic":"一句话","kind":"fact","positions":{"A":"一句话","B":"一句话"},"verdict":"一两句话"}]}',
+              'scores 和每条 positions 里都要包含每一份回答。如果难分高下，best 填 "tie"。']
     return "\n".join(lines)
 
 
@@ -1288,10 +1299,21 @@ def build_judge_prompt_en(question, earlier, answers):
               "- usefulness: does it genuinely help the person who asked",
               "- overall 1 to 5: your overall judgment, not a simple average",
               "",
+              "Also find where the answers agree and where they disagree:",
+              "- consensus: key conclusions all answers share, at most 5, one sentence each.",
+              "- conflicts: substantive disagreements between answers, at most 6. List only differences in content (facts, "
+              "numbers, conclusions, advice, approach), not in wording, length or formatting. Use an empty array if there are none. Each has:",
+              "  - topic: the point of disagreement, one sentence.",
+              "  - kind: fact (facts or numbers conflict, so at least one is wrong), advice (different recommendations or approaches) or emphasis (different priorities or trade-offs).",
+              '  - positions: what each answer says on this point, one sentence each; write "not mentioned" if it does not address it.',
+              "  - verdict: which position is more credible and why; if you cannot tell, say how to check.",
+              "",
               "Output only one JSON object and no other text. Format:",
               '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"one-sentence comment in English"}},'
-              '"best":"A","reason":"one or two sentences in English on why it is best"}',
-              'Include every answer in scores. Refer to answers as "Answer A", "Answer B" and so on. If they are too close to call, set best to "tie".']
+              '"best":"A","reason":"one or two sentences in English on why it is best",'
+              '"consensus":["one sentence"],'
+              '"conflicts":[{"topic":"one sentence","kind":"fact","positions":{"A":"one sentence","B":"one sentence"},"verdict":"one or two sentences"}]}',
+              'Include every answer in scores and in each positions object. Refer to answers as "Answer A", "Answer B" and so on. If they are too close to call, set best to "tie".']
     return "\n".join(lines)
 
 
@@ -1316,6 +1338,27 @@ def parse_judge(text):
         if isinstance(o, dict) and isinstance(o.get("scores"), dict):
             return o
     return None
+
+
+def norm_conflicts(o, mapping):
+    """把评审给出的共识和分歧整理好，匿名标签换回工具名。"""
+    def lab(k):
+        k = str(k).strip().upper().replace("回答", "").replace("ANSWER", "").strip()
+        return mapping.get(k)
+    cons = [str(x).strip() for x in (o.get("consensus") or []) if str(x).strip()][:8] if isinstance(o.get("consensus"), list) else []
+    out = []
+    for c in (o.get("conflicts") or [])[:10] if isinstance(o.get("conflicts"), list) else []:
+        if not isinstance(c, dict) or not str(c.get("topic") or "").strip():
+            continue
+        pos = {}
+        for k, v in (c.get("positions") or {}).items() if isinstance(c.get("positions"), dict) else []:
+            t = lab(k)
+            if t:
+                pos[t] = str(v or "").strip()
+        kind = str(c.get("kind") or "").strip().lower()
+        out.append({"topic": str(c["topic"]).strip(), "kind": kind if kind in ("fact", "advice", "emphasis") else "advice",
+                    "positions": pos, "verdict": str(c.get("verdict") or "").strip()})
+    return cons, out
 
 
 def judgment(rid, lang="zh"):
@@ -1408,6 +1451,7 @@ def start_judge(rid, model="", lang="zh"):
                     rows.append((rid, tool, overall, json.dumps(detail), str(sc.get("comment") or "")))
                 b = str(o.get("best") or "").strip().upper()
                 best = "tie" if b in ("TIE", "平手") else mapping.get(b.replace("回答", "").replace("ANSWER", "").strip(), "")
+                o["consensus_n"], o["conflicts_n"] = norm_conflicts(o, mapping)
                 reason, result, status = str(o.get("reason") or ""), o, "ok"
                 for row in rows:
                     q("INSERT OR REPLACE INTO judge_scores(run_id, tool, overall, detail, comment) VALUES(?,?,?,?,?)", row)
@@ -1993,6 +2037,28 @@ a.att{text-decoration:none}a.att:hover{border-color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
 .judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
+.dis{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--solid)}
+.dis>summary{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;font-size:13.5px;font-weight:600;color:var(--ink)}
+.dis>summary::-webkit-details-marker{display:none}
+.dis>summary .chev{transition:transform .2s}.dis[open]>summary .chev{transform:rotate(90deg)}
+.dis>summary .dsub{font-weight:400;color:var(--muted);font-size:12.5px}
+.dbody{padding:2px 14px 14px;display:grid;gap:12px}
+.dcons{margin:0;padding:10px 12px 10px 30px;border-radius:9px;background:color-mix(in srgb,var(--ok) 8%,transparent);font-size:13px;line-height:1.6}
+.dcons b{display:block;margin-left:-18px;margin-bottom:2px;color:var(--ok);font-size:12.5px}
+.dc{border-top:1px solid var(--line);padding-top:12px}
+.dc:first-child{border-top:0;padding-top:0}
+.dt{display:flex;gap:8px;align-items:baseline;font-size:13.5px;font-weight:600;line-height:1.5;margin-bottom:8px}
+.dk{flex:none;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px}
+.dk.fact{background:color-mix(in srgb,var(--bad) 13%,transparent);color:var(--bad)}
+.dk.advice{background:var(--gold-bg);color:var(--gold)}
+.dk.emphasis{background:var(--soft);color:var(--muted)}
+.dp{display:grid;gap:10px}
+.dp>div{padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 60%,transparent);border-left:3px solid var(--c);font-size:13px;line-height:1.55}
+.dp>div.nm{color:var(--muted)}
+.dp b{display:block;font-size:12px;margin-bottom:2px;color:var(--ink)}
+.dv{margin-top:8px;font-size:12.5px;line-height:1.6;color:var(--muted)}
+.dv b{color:var(--ink);font-weight:600}
+@media (max-width:760px){.dp{grid-template-columns:1fr!important}}
 .jd{padding:7px 12px 8px;font-size:12.5px;line-height:1.6;color:var(--muted);border-top:1px dashed var(--line);background:color-mix(in srgb,var(--soft) 55%,transparent)}
 .jd b{color:var(--ink);margin-right:6px}
 .jd .jx{font-size:11.5px;margin-left:6px;opacity:.85}
@@ -2208,7 +2274,9 @@ const I18N={zh:{
  'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
  'copy':'复制','copied':'已复制','m.actual':'实际使用：{0}','m.chosen':'（选择的是 {0}）','m.model':'模型：{0}','m.effort':'Effort：{0}','cost':'　约 ${0}',
  'j.autoTitle':'每轮回答完成后，自动把回答匿名交给 {0} 评分','j.auto':'{0} 自动评分','j.modelAria':'评分使用的模型',
- 'j.ask':'让 {0} 评分','j.busy':'{0} 评分中…','j.elapsed':'已 {0} 秒','j.last':'最新输出：{0}','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
+ 'j.ask':'让 {0} 评分、找分歧',
+ 'd.title':'分歧与共识','d.nConf':'{0} 处分歧','d.nFact':'（{0} 处事实冲突）','d.noConf':'没有实质分歧','d.nCons':'{0} 条共识','d.nConf1':'1 处分歧','d.nCons1':'1 条共识','d.dot':' · ',
+ 'd.k.fact':'事实冲突','d.k.advice':'建议不同','d.k.emphasis':'侧重不同','d.na':'未提及','d.verdict':'{0} 的判断：','d.cons':'几家都同意','j.busy':'{0} 评分中…','j.elapsed':'已 {0} 秒','j.last':'最新输出：{0}','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
  'j.fail':'评分失败：{0}','j.unknown':'未知原因','j.none':'未选出','j.agree':'和你的选择一致','j.best':'{0} 认为最佳：','j.sep':'。',
  'k.accuracy':'准确','k.completeness':'完整','k.clarity':'清晰','k.usefulness':'实用',
  't.busy':'上一轮还在生成，等它结束再追问','t.pickTool':'至少选中一个工具',
@@ -2247,7 +2315,9 @@ const I18N={zh:{
  'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
  'copy':'Copy','copied':'Copied','m.actual':'Actual model: {0}','m.chosen':' (selected: {0})','m.model':'Model: {0}','m.effort':'Effort: {0}','cost':'   ≈ ${0}',
  'j.autoTitle':'After each round, send the answers anonymously to {0} for scoring','j.auto':'{0} auto-score','j.modelAria':'Scoring model',
- 'j.ask':'Ask {0} to score','j.busy':'{0} is scoring…','j.elapsed':'{0}s so far','j.last':'Latest output: {0}','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
+ 'j.ask':'Ask {0} to score and compare',
+ 'd.title':'Disagreements and agreement','d.nConf':'{0} disagreements','d.nFact':' ({0} factual)','d.noConf':'No real disagreements','d.nCons':'{0} shared points','d.nConf1':'1 disagreement','d.nCons1':'1 shared point','d.dot':' · ',
+ 'd.k.fact':'Facts differ','d.k.advice':'Advice differs','d.k.emphasis':'Emphasis differs','d.na':'Not mentioned','d.verdict':'{0}: ','d.cons':'All answers agree','j.busy':'{0} is scoring…','j.elapsed':'{0}s so far','j.last':'Latest output: {0}','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
  'j.fail':'Scoring failed: {0}','j.unknown':'unknown reason','j.none':'none','j.agree':'matches your pick','j.best':'{0} picks as best: ','j.sep':'. ',
  'k.accuracy':'Accuracy','k.completeness':'Completeness','k.clarity':'Clarity','k.usefulness':'Usefulness',
  't.busy':'The last round is still running. Wait for it to finish before following up.','t.pickTool':'Select at least one tool',
@@ -2380,7 +2450,7 @@ function makeTurn(th,meta,idx){
   const el=r.el=document.createElement('section');el.className='turn';
   el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span>${+meta.peers?`<span class="chip peer" title="${esc(T('peers.title'))}">${T('peers.chip')}</span>`:''}<span class="tsum"></span></div>
     <div class="tbody">${(meta.attachments||[]).length?`<div class="tatts">${attLinks(r.id,meta.attachments)}</div>`:''}<div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
-    <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div></div>`;
+    <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div><details class="dis" hidden></details></div>`;
   $('.tq',el).textContent=meta.prompt;
   if(CFG.judge)$('.jbtn',el).onclick=()=>askJudge(r);
   const h2=$('.th2',el);h2.onclick=()=>fold(r,!r.folded);
@@ -2551,6 +2621,7 @@ function renderJudge(r,j){
   b.disabled=busy;b.textContent=busy?T('j.busy',tname(CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
   res.classList.toggle('err',j.status==='error');res.title='';
   for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
+  {const d=$('.dis',r.el);if(d&&j.status!=='ok'){d.hidden=true;d.innerHTML=''}}
   if(busy){const tail=clean(j.raw||'').trim().split('\n').filter(Boolean).pop()||'';
     res.textContent=T('j.sending',tname(CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
     res.title=tail?T('j.last',tail.slice(-300)):'';return}
@@ -2561,7 +2632,25 @@ function renderJudge(r,j){
     jd.innerHTML=`<b>${name} ${x.overall!=null?x.overall:'—'}/5</b>${esc(deanon(x.comment,j.mapping))}${det?`<span class="jx">${esc(det)}</span>`:''}`}
   const best=j.best==='tie'?T('tie'):j.best?tname(j.best):T('j.none');
   const agree=r.winner&&j.best?(r.winner===j.best?`<span class="agree">${T('j.agree')}</span>`:''):'';
+  renderConflicts(r,j);
   const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
+}
+
+function renderConflicts(r,j){  // 共识和分歧：每家的说法放在对应回答那一列下面
+  const box=$('.dis',r.el);if(!box)return;
+  const res=j.result||{},cons=res.consensus_n||[],conf=res.conflicts_n||[];
+  if(!cons.length&&!conf.length){box.hidden=true;box.innerHTML='';return}
+  const nf=conf.filter(c=>c.kind==='fact').length,wasOpen=box.dataset.done?box.open:null;
+  const sub=[conf.length?T(conf.length===1?'d.nConf1':'d.nConf',conf.length)+(nf?T('d.nFact',nf):''):T('d.noConf'),cons.length?T(cons.length===1?'d.nCons1':'d.nCons',cons.length):''].filter(Boolean).join(T('d.dot'));
+  const D=x=>esc(deanon(x,j.mapping));
+  box.innerHTML=`<summary><span class="chev sm">${svg(I.chev)}</span>${esc(T('d.title'))}<span class="dsub">${esc(sub)}</span></summary>
+  <div class="dbody">${conf.map(c=>`<div class="dc"><div class="dt"><span class="dk ${esc(c.kind)}">${esc(T('d.k.'+c.kind))}</span><span>${D(c.topic)}</span></div>
+    <div class="dp" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))">${r.tools.map(t=>{const v=(c.positions||{})[t];
+      const nm=!v||/^(未提及|not mentioned)\.?$/i.test(v.trim());
+      return `<div class="${nm?'nm':''}" style="--c:${esc(color(t))}"><b>${esc(tname(t))}</b>${v?D(v):esc(T('d.na'))}</div>`}).join('')}</div>
+    ${c.verdict?`<div class="dv"><b>${esc(T('d.verdict',tname(CFG.judge||'grok')))}</b>${D(c.verdict)}</div>`:''}</div>`).join('')}
+  ${cons.length?`<ul class="dcons"><b>${esc(T('d.cons'))}</b>${cons.map(x=>`<li>${D(x)}</li>`).join('')}</ul>`:''}</div>`;
+  box.hidden=false;box.open=wasOpen!=null?wasOpen:conf.length>0;box.dataset.done='1';
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd,atts,copyFrom){
