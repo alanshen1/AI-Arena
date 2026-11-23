@@ -10,14 +10,17 @@
 界面在同目录的 arena.html（缺失时用脚本内置版本）。
 仅依赖 Python 3.8+ 标准库。
 """
-import codecs, copy, glob, json, os, platform, random, re, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
+import codecs, copy, glob, json, os, platform, random, re, zipfile, xml.etree.ElementTree as ET, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+import mimetypes
+import urllib.parse
 
 HERE = Path(__file__).resolve().parent
 CFG_PATH = Path(os.environ.get("ARENA_CONFIG", HERE / "arena_config.json"))
 DB_PATH = Path(os.environ.get("ARENA_DB", HERE / "arena.db"))
+ATTACH_DIR = Path(os.environ.get("ARENA_ATTACH", HERE / "attachments"))  # 附件原文件与提取出的文字
 PORT = int(os.environ.get("ARENA_PORT", 8765))
 TOKEN = secrets.token_urlsafe(24)  # 每次启动重新生成，防止其他网页调用本地接口
 IDLE_EXIT = "--idle-exit" in sys.argv  # 由 macOS App 启动时开启：网页关闭一段时间后自动退出
@@ -36,7 +39,7 @@ DEFAULT_CFG = {
             "parser": "claude_stream", "color": "#d97757",
             "package": "@anthropic-ai/claude-code",
             "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit", "hint_en": "Follow the prompts to sign in, then type /exit",
-            "resume_args": ["--resume", "{session}"],
+            "resume_args": ["--resume", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "model_flag": "--model", "default_label": "默认（账户默认）", "default_label_en": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
@@ -55,7 +58,7 @@ DEFAULT_CFG = {
         "antigravity": {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
             "parser": "agy_stream", "color": "#7b61ff",
-            "resume_args": ["--conversation", "{session}"],
+            "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "pty": True,  # agy -p 在非终端环境下可能卡住，用伪终端运行
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
             "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit", "hint_en": "Sign in with your Google account, then type /quit",
@@ -118,6 +121,9 @@ MSG = {
     "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
     "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
     "chat_note": ("[聊天模式] 已要求像通用助手那样完整作答\n", "[chat mode] Asked to answer like a general-purpose assistant\n"),
+    "too_big": ("文件太大（上限 {mb} MB）", "File too large (limit {mb} MB)"),
+    "attach_missing": ("附件不存在或已过期，请重新添加：{name}", "Attachment missing or expired; add it again: {name}"),
+    "attach_note": ("[附件] {n} 个，提取文字约 {chars} 字\n", "[attachments] {n} file(s), about {chars} characters of text\n"),
     "judge_interrupted": ("评分被中断（后台服务重启过），可以重试", "Scoring was interrupted (the background service restarted). Try again."),
     "judge_timeout_tail": ("{label} 超过 {sec} 秒没有完成。最后的输出：{tail}", "{label} did not finish within {sec} seconds. Last output: {tail}"),
     "judge_no_output": ("（没有任何输出）", "(no output at all)"),
@@ -472,7 +478,7 @@ def open_login(tool, lang="zh"):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
   tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
-  thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0);
+  thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0, attachments TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds REAL, output TEXT,
   log TEXT, cmd TEXT, model TEXT DEFAULT '', actual_model TEXT DEFAULT '', effort TEXT DEFAULT '',
   session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
@@ -489,7 +495,7 @@ DB_LOCK = threading.Lock()
 def migrate(c):  # 旧数据库补列
     for table, col in (("runs", "models"), ("outputs", "model"), ("outputs", "actual_model"),
                        ("runs", "efforts"), ("outputs", "effort"), ("runs", "thread"), ("runs", "parent"),
-                       ("outputs", "session")):
+                       ("outputs", "session"), ("runs", "attachments")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     if "chat" not in [r[1] for r in c.execute("PRAGMA table_info(runs)")]:
@@ -735,13 +741,285 @@ PARSERS = {"claude_stream": lambda lang="zh": ClaudeStream(), "codex_json": Code
 
 CHAT_PREFIX = {
     "zh": ("请像通用 AI 助手（而不是编程助手）那样回答下面的问题：给出完整、有结构、可以直接照着做的回答，"
-           "包括具体做法、数字或例子；需要时用标题、列表或表格。不要读写本地文件，也不要执行命令，除非问题确实需要。"
-           "用提问所用的语言回答。\n\n问题：\n"),
+           "包括具体做法、数字或例子；需要时用标题、列表或表格。除了查看下面列出的附件，不要读写本地文件，"
+           "也不要执行命令，除非问题确实需要。用提问所用的语言回答。\n\n"),
     "en": ("Answer the question below the way a general-purpose AI assistant would, not as a coding agent: give a complete, "
            "well-structured answer the person can act on, with concrete steps, numbers or examples; use headings, lists or "
-           "tables where they help. Do not read or write local files or run commands unless the question really needs it. "
-           "Answer in the language of the question.\n\nQuestion:\n"),
+           "tables where they help. Apart from viewing the attachments listed below, do not read or write local files or run "
+           "commands unless the question really needs it. Answer in the language of the question.\n\n"),
 }
+Q_LABEL = {"zh": "问题：\n", "en": "Question:\n"}
+
+# ---------------- 附件 ----------------
+MAX_UPLOAD_MB = 50
+FILE_CHARS = 60000      # 每个附件最多放进问题的字数
+TOTAL_CHARS = 100000    # 所有附件合计上限（命令行参数长度有限）
+TEXT_EXT = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".xml", ".html", ".htm", ".yaml", ".yml",
+            ".log", ".ini", ".toml", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".c", ".cpp", ".h",
+            ".cs", ".rb", ".php", ".sh", ".sql", ".swift", ".kt", ".css", ".scss", ".vue", ".r", ".m", ".tex", ".srt", ".vtt"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tiff", ".svg"}
+KIND = {".docx": "Word", ".doc": "Word", ".xlsx": "Excel", ".xlsm": "Excel", ".xls": "Excel", ".pptx": "PowerPoint",
+        ".pdf": "PDF", ".rtf": "RTF", ".odt": "ODT", ".csv": "CSV"}
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+SS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+RN = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+
+def safe_name(name):
+    name = os.path.basename(str(name or "").replace("\\", "/")).strip().lstrip(".")
+    name = re.sub(r'[\x00-\x1f/:*?"<>|]', "_", name)[:120]
+    return name or "file"
+
+
+def _docx_text(path):
+    with zipfile.ZipFile(path) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    out = []
+
+    def para(p):
+        parts = []
+        for el in p.iter():
+            if el.tag == W + "t" and el.text:
+                parts.append(el.text)
+            elif el.tag == W + "tab":
+                parts.append("\t")
+            elif el.tag in (W + "br", W + "cr"):
+                parts.append("\n")
+        return "".join(parts)
+
+    body = root.find(W + "body")
+    for el in (body if body is not None else []):
+        if el.tag == W + "p":
+            out.append(para(el))
+        elif el.tag == W + "tbl":
+            for tr in el.iter(W + "tr"):
+                out.append(" | ".join(" ".join(para(p) for p in tc.iter(W + "p")).strip() for tc in tr.findall(W + "tc")))
+            out.append("")
+    return "\n".join(out)
+
+
+def _xlsx_text(path, max_rows=3000):
+    with zipfile.ZipFile(path) as z:
+        names = set(z.namelist())
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(SS + "si"):
+                shared.append("".join(t.text or "" for t in si.iter(SS + "t")))
+        wb = ET.fromstring(z.read("xl/workbook.xml"))
+        rels = {}
+        if "xl/_rels/workbook.xml.rels" in names:
+            for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels")):
+                rels[r.get("Id")] = r.get("Target", "")
+        out = []
+        for sh in wb.iter(SS + "sheet"):
+            target = rels.get(sh.get(RN + "id"), "")
+            target = target.lstrip("/")
+            target = target if target.startswith("xl/") else "xl/" + target
+            if target not in names:
+                continue
+            out.append(f"## {sh.get('name')}")
+            n = 0
+            for row in ET.fromstring(z.read(target)).iter(SS + "row"):
+                cells = []
+                for c in row.findall(SS + "c"):
+                    t, v = c.get("t"), c.find(SS + "v")
+                    if t == "s" and v is not None:
+                        val = shared[int(v.text)] if v.text and v.text.isdigit() and int(v.text) < len(shared) else ""
+                    elif t == "inlineStr":
+                        val = "".join(x.text or "" for x in c.iter(SS + "t"))
+                    else:
+                        val = v.text if v is not None and v.text is not None else ""
+                    if val == "" and c.find(SS + "f") is not None and c.find(SS + "f").text:
+                        val = "=" + c.find(SS + "f").text  # 没有缓存结果的公式，给出公式本身
+                    cells.append(val)
+                while cells and cells[-1] == "":
+                    cells.pop()
+                if cells:
+                    out.append("\t".join(cells))
+                    n += 1
+                    if n >= max_rows:
+                        out.append("…")
+                        break
+            out.append("")
+    return "\n".join(out)
+
+
+def _pptx_text(path):
+    with zipfile.ZipFile(path) as z:
+        slides = sorted((n for n in z.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
+                        key=lambda n: int(re.findall(r"\d+", n)[-1]))
+        out = []
+        for i, n in enumerate(slides, 1):
+            root = ET.fromstring(z.read(n))
+            paras = ["".join(t.text or "" for t in p.iter(A_NS + "t")) for p in root.iter(A_NS + "p")]
+            out.append(f"## Slide {i}\n" + "\n".join(x for x in paras if x.strip()))
+    return "\n\n".join(out)
+
+
+JXA_PDF = """ObjC.import('Quartz'); function run(a){var d=$.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath(a[0]));
+return d.isNil()?'':ObjC.unwrap(d.string);}"""
+
+
+def _pdf_text(path):
+    exe = shutil.which("pdftotext", path=PATH_CACHE)
+    if exe:
+        r = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(path), "-"], capture_output=True, timeout=120)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.decode("utf-8", "replace"), "pdftotext"
+    if sys.platform == "darwin":  # macOS 自带 PDFKit，不需要安装任何东西
+        r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", JXA_PDF, str(path)],
+                           capture_output=True, timeout=120)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.decode("utf-8", "replace"), "PDFKit"
+    return "", ""
+
+
+def _read_text_file(path):
+    raw = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "gb18030", "shift_jis", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace")
+
+
+def extract_text(path):
+    """返回 (文字, 方式)。提取不了时文字为空，工具仍可按路径打开原文件。"""
+    ext = Path(path).suffix.lower()
+    try:
+        if ext in TEXT_EXT:
+            return _read_text_file(path), "text"
+        if ext == ".docx":
+            return _docx_text(path), "docx"
+        if ext in (".xlsx", ".xlsm"):
+            return _xlsx_text(path), "xlsx"
+        if ext == ".pptx":
+            return _pptx_text(path), "pptx"
+        if ext == ".pdf":
+            return _pdf_text(path)
+        if ext in (".doc", ".rtf", ".odt", ".rtfd", ".webarchive") and sys.platform == "darwin":
+            r = subprocess.run(["/usr/bin/textutil", "-convert", "txt", "-stdout", str(path)], capture_output=True, timeout=120)
+            if r.returncode == 0:
+                return r.stdout.decode("utf-8", "replace"), "textutil"
+    except Exception as e:
+        return "", f"error: {e}"
+    return "", ""
+
+
+def save_upload(name, stream, length):
+    """写入暂存区并提取文字，返回附件信息。"""
+    uid = uuid.uuid4().hex[:12]
+    d = ATTACH_DIR / "_staging" / uid
+    d.mkdir(parents=True, exist_ok=True)
+    name = safe_name(name)
+    path = d / name
+    left = length
+    with open(path, "wb") as f:
+        while left > 0:
+            chunk = stream.read(min(1 << 20, left))
+            if not chunk:
+                break
+            f.write(chunk)
+            left -= len(chunk)
+    text, method = extract_text(path)
+    text = re.sub(r"\n{3,}", "\n\n", text.replace("\r\n", "\n")).strip()
+    (d / "_text.txt").write_text(text, encoding="utf-8")
+    ext = path.suffix.lower()
+    meta = {"id": uid, "name": name, "size": path.stat().st_size, "ext": ext,
+            "kind": "image" if ext in IMAGE_EXT else KIND.get(ext, "text" if ext in TEXT_EXT else "file"),
+            "chars": len(text), "method": method if text else ""}
+    (d / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return meta
+
+
+def claim_attachments(ids, rid, lang):
+    """把暂存区的附件移到这一轮的目录，返回附件信息列表。"""
+    metas = []
+    for uid in [str(x) for x in ids or []][:20]:
+        if not re.fullmatch(r"[0-9a-f]{12}", uid):
+            continue
+        src = ATTACH_DIR / "_staging" / uid
+        if not (src / "_meta.json").exists():
+            raise ValueError(M(lang, "attach_missing", name=uid))
+        dst = ATTACH_DIR / rid / uid
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        meta = json.loads((dst / "_meta.json").read_text(encoding="utf-8"))
+        meta["path"] = str(dst / meta["name"])
+        metas.append(meta)
+    return metas
+
+
+def attachment_block(metas, lang, budget=TOTAL_CHARS, per_file=FILE_CHARS, with_paths=True):
+    """把附件拼成一段文字：提取出的内容 + 原文件路径（工具可以只读打开）。"""
+    if not metas:
+        return ""
+    en = lang == "en"
+    if with_paths:
+        intro = (f"Attached files ({len(metas)}). Their text content is included below. The original files are saved on this "
+                 "computer; open them read-only if you need images, charts, formulas or layout that the text does not capture." if en
+                 else f"附件（共 {len(metas)} 个）。下面是从附件里提取的文字内容。原文件保存在本机，"
+                      "如果需要看图片、图表、公式或排版这类文字里没有的信息，可以只读打开原文件。")
+    else:
+        intro = (f"Attached files ({len(metas)}), text content only:" if en else f"附件（共 {len(metas)} 个），只含提取出的文字：")
+    lines = [intro, ""]
+    left = budget
+    for i, m in enumerate(metas, 1):
+        head = (f"[Attachment {i}: {m['name']} ({m['kind']}, {m['chars']:,} characters)]" if en
+                else f"【附件 {i}：{m['name']}（{m['kind']}，约 {m['chars']:,} 字）】")
+        lines.append(head)
+        if with_paths and m.get("path"):
+            lines.append(("Path: " if en else "路径：") + m["path"])
+        text = ""
+        try:
+            text = (Path(m["path"]).parent / "_text.txt").read_text(encoding="utf-8")
+        except Exception:
+            pass
+        if not text:
+            lines.append(("(No text could be extracted. Open the original file to view it.)" if en
+                          else "（无法提取文字，请直接打开原文件查看。）") if with_paths else
+                         ("(No text could be extracted, e.g. an image.)" if en else "（没有可提取的文字，比如图片。）"))
+        else:
+            cap = max(0, min(per_file, left))
+            if len(text) > cap:
+                text = text[:cap] + ((f"\n…(only the first {cap:,} characters are included; open the file for the rest)" if en
+                                      else f"\n……（只附了前 {cap:,} 字，其余部分请打开原文件查看）") if with_paths else
+                                     (f"\n…(truncated to the first {cap:,} characters)" if en else f"\n……（只附了前 {cap:,} 字）"))
+            left -= min(len(text), cap)
+            lines.append(text)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n\n"
+
+
+def copy_attachments(src_rid):
+    """重跑时：把某一轮的附件复制回暂存区，返回新的附件 ID。"""
+    r = q("SELECT attachments FROM runs WHERE id=?", (src_rid,), one=True)
+    ids = []
+    for m in json.loads((r or {}).get("attachments") or "[]"):
+        src = ATTACH_DIR / safe_name(src_rid) / safe_name(m.get("id", ""))
+        if not (src / "_meta.json").exists():
+            continue
+        uid = uuid.uuid4().hex[:12]
+        dst = ATTACH_DIR / "_staging" / uid
+        shutil.copytree(src, dst)
+        meta = json.loads((dst / "_meta.json").read_text(encoding="utf-8"))
+        meta["id"] = uid
+        (dst / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        ids.append(uid)
+    return ids
+
+
+def cleanup_staging(max_age=86400):
+    st = ATTACH_DIR / "_staging"
+    if st.exists():
+        for d in st.iterdir():
+            try:
+                if time.time() - d.stat().st_mtime > max_age:
+                    shutil.rmtree(d, ignore_errors=True)
+            except OSError:
+                pass
 
 
 def build_transcript(history, prompt, lang="zh"):
@@ -771,8 +1049,11 @@ def kill(p):
 MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # 如 Codex 在 stderr 打印的 "model: gpt-…"
 
 
-def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False):
+def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False,
+              attach="", attach_dir=""):
     base, extra, note = list(spec["cmd"]), [], ""
+    if attach_dir and cwd and spec.get("add_dir_args"):  # 指定了工作目录时，另外允许读附件目录
+        extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
     if effort and spec.get("effort_args"):
@@ -794,14 +1075,19 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     elif history:
         prompt = build_transcript(history, prompt, lang)
         note = M(lang, "resume_transcript", n=len(history))
+    if attach:  # 附件内容放在问题前面
+        prompt = attach + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
     if chat:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
-        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + prompt
+        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     shown = " ".join(shlex.quote(a) for a in base)
     out, log, t0, status = [], [], time.time(), "ok"
     actual, errhead, sess = [""], [""], [""]
     run.emit({"tool": name, "type": "start", "cmd": shown, "model": model, "effort": effort})
+    if attach:
+        note += M(lang, "attach_note", n=attach.count("\n【附件 ") + attach.count("\n[Attachment ") or 1,
+                  chars=f"{len(attach):,}")
     if note:
         log.append(note)
         run.emit({"tool": name, "type": "log", "data": note})
@@ -1043,6 +1329,11 @@ def start_judge(rid, model="", lang="zh"):
     labels = "ABCDEFGH"
     mapping = {labels[i]: o["tool"] for i, o in enumerate(outs)}
     prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)], lang)
+    metas = json.loads(run.get("attachments") or "[]")
+    if metas:  # 附件内容也给评审，用来核对回答对附件的理解
+        prompt = (("The question came with attachments. Their text is below for checking the answers.\n\n" if lang == "en"
+                   else "提问时附带了附件，下面是附件的文字内容，供你核对回答是否准确。\n\n")
+                  + attachment_block(metas, lang, budget=40000, per_file=20000, with_paths=False) + prompt)
     q("DELETE FROM judge_scores WHERE run_id=?", (rid,))
     q("INSERT OR REPLACE INTO judgments(run_id, judge, model, status, best, reason, mapping, result, raw, seconds, created_at) "
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (rid, jn, model, "running", "", "", json.dumps(mapping), "{}", "", 0, time.time()))
@@ -1164,7 +1455,7 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
 
 
 def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh",
-              chat=False):
+              chat=False, attachments=None):
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories = "", "", {}, {}
@@ -1191,16 +1482,22 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     models = {t: str((models or {}).get(t) or "").strip() for t in tools}
     efforts = {t: e if re.fullmatch(r"[a-z]{1,12}", e := str((efforts or {}).get(t) or "").strip()) else ""
                for t in tools}
-    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
-                                          json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat))))
+    metas = claim_attachments(attachments, rid, lang) if attachments else []
+    attach = attachment_block(metas, lang)
+    attach_dir = str(ATTACH_DIR / rid) if metas else ""
+    run_cwd = cwd or attach_dir or None  # 没指定工作目录时，在附件目录里运行，工具能直接读到附件
+    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
+                                            json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat)),
+                                            json.dumps(metas, ensure_ascii=False)))
     run = Run(rid, tools)
     run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
     for t in tools:
-        threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, cwd, cfg.get("timeout", 600),
+        threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, run_cwd, cfg.get("timeout", 600),
                                                  models[t], efforts[t], sessions.get(t, ""),
-                                                 None if sessions.get(t) else histories.get(t), bool(chat)),
+                                                 None if sessions.get(t) else histories.get(t), bool(chat),
+                                                 attach, attach_dir if cwd else ""),
                          daemon=True).start()
     return rid, tools, models, efforts
 
@@ -1212,6 +1509,7 @@ def run_detail(rid, with_turns=True, lang="zh"):
     r["tools"] = json.loads(r["tools"] or "[]")
     r["models"] = json.loads(r.get("models") or "{}")
     r["efforts"] = json.loads(r.get("efforts") or "{}")
+    r["attachments"] = [{k: v for k, v in m.items() if k != "path"} for m in json.loads(r.get("attachments") or "[]")]
     r["outputs"] = q("SELECT * FROM outputs WHERE run_id=?", (rid,))
     r["ratings"] = q("SELECT tool, score, note FROM ratings WHERE run_id=?", (rid,))
     live = RUNS.get(rid)
@@ -1303,6 +1601,29 @@ class H(BaseHTTPRequestHandler):
                                       "efforts": v.get("efforts", []) if v.get("effort_args") else []}
                                   for k, v in cfg["tools"].items()},
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
+        elif p.startswith("/api/file/"):  # 打开某一轮的附件原文件
+            parts = p.split("/")
+            if len(parts) != 6:
+                return self._json({"error": "not found"}, 404)
+            rid, uid, name = parts[3], parts[4], urllib.parse.unquote(parts[5])
+            meta_p = ATTACH_DIR / safe_name(rid) / safe_name(uid) / "_meta.json"
+            try:
+                meta = json.loads(meta_p.read_text(encoding="utf-8"))
+            except Exception:
+                return self._json({"error": "not found"}, 404)
+            fp = meta_p.parent / meta["name"]
+            if not fp.is_file() or meta["name"] != name:
+                return self._json({"error": "not found"}, 404)
+            ctype = mimetypes.guess_type(meta["name"])[0] or "application/octet-stream"
+            data = fp.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", "inline; filename*=UTF-8''" + urllib.parse.quote(meta["name"]))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "sandbox")
+            self.end_headers()
+            self.wfile.write(data)
         elif p.startswith("/api/stream/"):
             self._sse(p.rsplit("/", 1)[1])
         elif p.startswith("/api/run/"):
@@ -1311,7 +1632,7 @@ class H(BaseHTTPRequestHandler):
         elif p == "/api/history":
             kw, tag = qs.get("q", ""), qs.get("tag", "")
             limit = max(1, min(int(qs.get("limit") or 200), 500))
-            rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd, chat,
+            rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd, chat, attachments,
                  (SELECT group_concat(tool||' '||score, '，') FROM ratings r WHERE r.run_id=runs.id AND score>0) scores,
                  (SELECT COUNT(*) FROM runs c WHERE c.thread=runs.id) nturns,
                  (SELECT c.winner FROM runs c WHERE c.id=runs.id OR c.thread=runs.id ORDER BY c.created_at DESC LIMIT 1) last_winner,
@@ -1321,6 +1642,8 @@ class H(BaseHTTPRequestHandler):
                    AND (prompt LIKE ? OR EXISTS(SELECT 1 FROM runs c WHERE c.thread=runs.id AND c.prompt LIKE ?))
                    AND (?='' OR tag=?) ORDER BY created_at DESC LIMIT ?""",
                      (f"%{kw}%", f"%{kw}%", tag, tag, limit))
+            for r in rows:
+                r["attachments"] = [{k: v for k, v in m.items() if k != "path"} for m in json.loads(r.get("attachments") or "[]")]
             self._json({"runs": rows})
         elif p == "/api/stats":
             tag = qs.get("tag", "")
@@ -1343,6 +1666,12 @@ class H(BaseHTTPRequestHandler):
         if not self._guard(u):
             return
         p = u.path
+        if p == "/api/upload":  # 原始字节上传，文件名放在 X-File-Name（URL 编码）
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > MAX_UPLOAD_MB * 1024 * 1024:
+                return self._json({"error": M(self.lang, "too_big", mb=MAX_UPLOAD_MB)}, 413)
+            name = urllib.parse.unquote(self.headers.get("X-File-Name") or "file")
+            return self._json(save_upload(name, self.rfile, n))
         try:
             b = self._body()
         except ValueError:
@@ -1352,10 +1681,13 @@ class H(BaseHTTPRequestHandler):
             if not prompt:
                 return self._json({"error": M(self.lang, "empty_prompt")}, 400)
             jflag, jmodel, chat = bool(b.get("judge")), str(b.get("judge_model") or ""), bool(b.get("chat"))
+            att = b.get("attachments") if isinstance(b.get("attachments"), list) else []
+            if b.get("copy_attachments_from"):
+                att = att + copy_attachments(str(b["copy_attachments_from"]))
             if b.get("parent"):
                 try:
                     rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]),
-                                                            judge=jflag, judge_model=jmodel, lang=self.lang)
+                                                            judge=jflag, judge_model=jmodel, lang=self.lang, attachments=att)
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
                 return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"]})
@@ -1364,11 +1696,16 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"error": M(self.lang, "no_dir", d=cwd)}, 400)
             models = b.get("models") if isinstance(b.get("models"), dict) else {}
             efforts = b.get("efforts") if isinstance(b.get("efforts"), dict) else {}
-            rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
-                                                    models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang,
-                                                    chat=chat)
+            try:
+                rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
+                                                        models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang,
+                                                        chat=chat, attachments=att)
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            row = q("SELECT attachments FROM runs WHERE id=?", (rid,), one=True) or {}
             self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "tag": b.get("tag") or "",
-                        "chat": chat})
+                        "chat": chat, "attachments": [{k: v for k, v in m.items() if k != "path"}
+                                                      for m in json.loads(row.get("attachments") or "[]")]})
         elif p.startswith("/api/cancel/"):
             run = RUNS.get(p.rsplit("/", 1)[1])
             if run:
@@ -1399,6 +1736,7 @@ class H(BaseHTTPRequestHandler):
         elif p.startswith("/api/delete/"):  # 删除首问时连同整条对话一起删除
             rid = p.rsplit("/", 1)[1]
             for x in q("SELECT id FROM runs WHERE id=? OR thread=?", (rid, rid)):
+                shutil.rmtree(ATTACH_DIR / safe_name(x["id"]), ignore_errors=True)
                 for t in ("outputs", "ratings", "judgments", "judge_scores"):
                     q(f"DELETE FROM {t} WHERE run_id=?", (x["id"],))
                 q("DELETE FROM runs WHERE id=?", (x["id"],))
@@ -1589,6 +1927,21 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
 .fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.attbtn{width:36px;height:36px;border-radius:10px}
+.attbtn svg{width:18px;height:18px}
+.atts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.atts:empty{display:none}
+.att{display:inline-flex;align-items:center;gap:7px;max-width:340px;padding:4px 6px 4px 8px;border-radius:9px;border:1px solid var(--line);background:var(--solid);font-size:12.5px}
+.att .ak{flex:none;font-size:10.5px;font-weight:700;letter-spacing:.02em;padding:1px 5px;border-radius:5px;background:var(--soft);color:var(--muted)}
+.att .an{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.att .as{flex:none;color:var(--muted);font-size:11.5px}
+.att.err{border-color:var(--bad)}.att.err .as{color:var(--bad)}
+.att.up .as::after{content:"…";animation:pulse 1.2s infinite}
+.att .ax{flex:none;border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 3px;border-radius:5px}
+.att .ax:hover{background:var(--soft);color:var(--ink)}
+a.att{text-decoration:none}a.att:hover{border-color:var(--focus)}
+.tatts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.composer.drop,.follow.drop{outline:2px dashed var(--focus);outline-offset:3px}
 .chatopt{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent);color:var(--ink);cursor:pointer;white-space:nowrap}
 .chip.chat{background:color-mix(in srgb,var(--focus) 12%,transparent);color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
@@ -1721,8 +2074,11 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="composer">
     <div class="cin">
       <textarea id="prompt" rows="1" placeholder="问一个问题，选中的模型会同时作答" data-i18n-ph="prompt.ph"></textarea>
+      <button class="ib attbtn" id="attBtn" type="button" data-i18n-title="att.title" data-i18n-aria="att.btn"></button>
+      <input type="file" id="attInput" multiple hidden>
       <button class="btn primary" id="go" data-i18n="send">发送</button>
     </div>
+    <div class="atts" id="atts"></div>
     <div class="lanes" id="lanes"></div>
     <div class="copts">
       <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
@@ -1782,7 +2138,8 @@ const tname=t=>CFG.tools[t]?.label||cap(t);
 const svg=p=>`<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>',
   copy:'<rect x="2.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M5.5 5.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>',
-  code:'<path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/>',close:'<path d="M4 4l8 8M12 4l-8 8"/>'};
+  code:'<path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/>',close:'<path d="M4 4l8 8M12 4l-8 8"/>',
+  clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- 语言 ---------- */
 const I18N={zh:{
  'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
@@ -1818,6 +2175,9 @@ const I18N={zh:{
  'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
  'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
  'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。',
+ 'att.btn':'添加附件','att.title':'添加附件：Word、Excel、PowerPoint、PDF、文本、图片等。也可以把文件拖进来，或直接粘贴。',
+ 'att.uploading':'上传中','att.chars':'已提取 {0} 字','att.image':'图片，工具可直接查看','att.noText':'没提取到文字，工具可打开原文件',
+ 'att.fail':'上传失败','att.remove':'移除','att.pending':'附件还在上传，请稍等','att.tooBig':'{0} 超过 50 MB，无法添加','att.open':'打开原文件','att.count':'{0} 个附件',
  'chat.label':'聊天模式','chat.title':'让所有工具都像通用助手（而不是编程助手）那样完整作答：给出有结构、可以照着做的回答。追问会沿用这个设置。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
@@ -1853,6 +2213,9 @@ const I18N={zh:{
  'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
  'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
  'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.',
+ 'att.btn':'Attach files','att.title':'Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.',
+ 'att.uploading':'Uploading','att.chars':'{0} characters extracted','att.image':'Image; tools can open it','att.noText':'No text extracted; tools can open the file',
+ 'att.fail':'Upload failed','att.remove':'Remove','att.pending':'Attachments are still uploading. Please wait.','att.tooBig':'{0} is larger than 50 MB and cannot be added','att.open':'Open the original file','att.count':'{0} attachments',
  'chat.label':'Chat mode','chat.title':'Ask every tool to answer like a general-purpose assistant rather than a coding agent, with complete, structured answers you can act on. Follow-ups keep this setting.','chat.chip':'Chat mode'
 }};
 const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
@@ -1931,23 +2294,26 @@ function makeRound(meta){
     <span class="ract"><button class="btn sm stop" hidden>${T('stop')}</button><button class="btn sm ghost rerun" title="${esc(T('rerun.title'))}">${T('rerun')}</button></span>
   </header>
   <div class="rbody" hidden><div class="turns"></div>
-    <div class="follow"><textarea class="fq" rows="1" placeholder="${esc(T('fq.ph'))}" aria-label="${esc(T('fq'))}"></textarea><button class="btn primary fgo">${T('fgo')}</button></div>
+    <div class="atts fatts"></div>
+    <div class="follow"><textarea class="fq" rows="1" placeholder="${esc(T('fq.ph'))}" aria-label="${esc(T('fq'))}"></textarea><button class="ib attbtn fatt" type="button" title="${esc(T('att.title'))}" aria-label="${esc(T('att.btn'))}"></button><input type="file" class="fattin" multiple hidden><button class="btn primary fgo">${T('fgo')}</button></div>
     <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
   if(+meta.chat)$('.chatc',el).innerHTML=`<span class="chip chat">${T('chat.chip')}</span>`;
+  if((meta.attachments||[]).length)$('.tagc',el).insertAdjacentHTML('beforebegin',`<span class="chip" title="${esc(meta.attachments.map(a=>a.name).join('\n'))}">📎 ${meta.attachments.length}</span>`);
   (meta.st||'').split('|').filter(Boolean).forEach(x=>{const i=x.indexOf(':'),seg=$(`.lanebar i[data-t="${CSS.escape(x.slice(0,i))}"]`,el);if(seg)seg.className=segCls(x.slice(i+1))});
   const w=meta.last_winner??meta.winner;if(w)$('.winc',el).innerHTML=`<span class="chip win">${winText(w)}</span>`;
   if((meta.nturns||0)>1)$('.nturn',el).innerHTML=`<span class="chip">${T('rounds',meta.nturns)}</span>`;
   const rh=$('.rh',el);
   rh.onclick=e=>{if(!e.target.closest('button'))setOpen(th,!th.open)};
   rh.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&e.target===rh){e.preventDefault();setOpen(th,!th.open)}};
-  $('.rerun',el).onclick=()=>{const keep=CHAT;CHAT=!!+meta.chat;send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'').finally(()=>CHAT=keep)};
+  $('.rerun',el).onclick=()=>{const keep=CHAT;CHAT=!!+meta.chat;send(meta.prompt,th.tools,meta.models||{},meta.efforts||{},meta.tag||'',meta.cwd||'',[],(meta.attachments||[]).length?th.id:'').finally(()=>CHAT=keep)};
   $('.stop',el).onclick=()=>th.turns.filter(r=>r.running).forEach(r=>post('/api/cancel/'+encodeURIComponent(r.id)).catch(toast));
   const fq=$('.fq',el);
   fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
   fq.onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();follow(th)}};
   $('.fgo',el).onclick=()=>follow(th);
+  th.att=makeAttacher($('.fatts',el),$('.fattin',el),$('.follow',el),$('.fatt',el));
   return th;
 }
 function setOpen(th,open){th.open=open;th.el.classList.toggle('open',open);$('.rbody',th.el).hidden=!open;$('.rh',th.el).setAttribute('aria-expanded',open);
@@ -1964,7 +2330,7 @@ function makeTurn(th,meta,idx){
   TURNS.set(r.id,r);th.turns.push(r);
   const el=r.el=document.createElement('section');el.className='turn';
   el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span><span class="tsum"></span></div>
-    <div class="tbody"><div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
+    <div class="tbody">${(meta.attachments||[]).length?`<div class="tatts">${attLinks(r.id,meta.attachments)}</div>`:''}<div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
     <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
   if(CFG.judge)$('.jbtn',el).onclick=()=>askJudge(r);
@@ -2070,6 +2436,38 @@ function paintWinner(r){const w=r.winner;
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
+/* ---------- 附件 ---------- */
+const fmtSize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+const kindTag=a=>({Word:'DOC',Excel:'XLS',PowerPoint:'PPT',PDF:'PDF',RTF:'RTF',ODT:'ODT',CSV:'CSV',image:'IMG',text:'TXT'}[a.kind]||(a.ext||'').replace('.','').slice(0,4).toUpperCase()||'FILE');
+const attStatus=a=>a.chars>0?T('att.chars',a.chars.toLocaleString()):a.kind==='image'?T('att.image'):T('att.noText');
+function makeAttacher(box,input,dropZone,btn){
+  const A={items:[]};
+  const render=()=>{box.innerHTML=A.items.map((a,i)=>`<span class="att${a.state==='up'?' up':a.state==='err'?' err':''}" title="${esc(a.name+'  '+fmtSize(a.size||0))}">
+    <span class="ak">${esc(kindTag(a))}</span><span class="an">${esc(a.name)}</span>
+    <span class="as">${a.state==='up'?T('att.uploading'):a.state==='err'?esc(a.err||T('att.fail')):esc(attStatus(a))}</span>
+    <button class="ax" type="button" data-i="${i}" aria-label="${esc(T('att.remove'))} ${esc(a.name)}">×</button></span>`).join('')};
+  box.addEventListener('click',e=>{const b=e.target.closest('.ax');if(!b)return;A.items.splice(+b.dataset.i,1);render()});
+  A.add=files=>{for(const f of files){
+    if(f.size>50*1048576){toast(T('att.tooBig',f.name));continue}
+    const it={name:f.name,size:f.size,state:'up',ext:(f.name.match(/\.[^.]+$/)||[''])[0].toLowerCase()};A.items.push(it);render();
+    fetch('/api/upload',{method:'POST',headers:{'X-Arena-Token':TOKEN,'X-Arena-Lang':LANG,'X-File-Name':encodeURIComponent(f.name),'Content-Type':'application/octet-stream'},body:f})
+      .then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||T('att.fail');Object.assign(it,j,{state:'ok'})})
+      .catch(e=>{it.state='err';it.err=String(e)}).finally(render)}};
+  A.ids=()=>A.items.filter(a=>a.state==='ok').map(a=>a.id);
+  A.pending=()=>A.items.some(a=>a.state==='up');
+  A.clear=()=>{A.items=[];render()};
+  btn.innerHTML=svg(I.clip);btn.onclick=()=>input.click();
+  input.onchange=()=>{A.add([...input.files]);input.value=''};
+  dropZone.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();dropZone.classList.add('drop')}});
+  dropZone.addEventListener('dragleave',e=>{if(!dropZone.contains(e.relatedTarget))dropZone.classList.remove('drop')});
+  dropZone.addEventListener('drop',e=>{if(!e.dataTransfer.files.length)return;e.preventDefault();dropZone.classList.remove('drop');A.add([...e.dataTransfer.files])});
+  dropZone.addEventListener('paste',e=>{const fs=[...(e.clipboardData?.files||[])];if(fs.length){e.preventDefault();A.add(fs)}});
+  return A;
+}
+const fileUrl=(rid,a)=>`/api/file/${encodeURIComponent(rid)}/${encodeURIComponent(a.id)}/${encodeURIComponent(a.name)}?token=${TOKEN}`;
+function attLinks(rid,list){return (list||[]).map(a=>`<a class="att" href="${fileUrl(rid,a)}" target="_blank" rel="noopener" title="${esc(T('att.open'))}"><span class="ak">${esc(kindTag(a))}</span><span class="an">${esc(a.name)}</span><span class="as">${esc(attStatus(a))}</span></a>`).join('')}
+let COMPOSER_ATT=null;
+
 /* ---------- 评分（匿名交给第三方模型） ---------- */
 let JSEL={model:'',auto:false},CHAT=true;
 function renderJudgeOpt(){
@@ -2117,10 +2515,11 @@ function renderJudge(r,j){
   const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
 }
 
-async function send(prompt,tools,models,efforts,tag,cwd){
-  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT});
+async function send(prompt,tools,models,efforts,tag,cwd,atts,copyFrom){
+  try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT,attachments:(atts||[]).map(a=>a.id),copy_attachments_from:copyFrom||''});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
-    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0};
+    const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0,
+      attachments:d.attachments||(atts||[]).map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))};
     const th=makeRound(meta);th.built=true;
     $('#empty').hidden=true;feed.prepend(th.el);
     const r=makeTurn(th,meta,0);r.autoJudge=!!(CFG.judge&&JSEL.auto);setOpen(th,true);paintHead(th);openStream(r);
@@ -2130,8 +2529,12 @@ async function send(prompt,tools,models,efforts,tag,cwd){
 async function follow(th){
   const fq=$('.fq',th.el),p=fq.value.trim(),last=lastTurn(th);if(!p)return fq.focus();if(!last)return;
   if(th.turns.some(r=>r.running))return toast(T('t.busy'));
-  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model});
-    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:''},th.turns.length);
+  if(th.att.pending())return toast(T('att.pending'));
+  const atts=th.att.items.filter(a=>a.state==='ok');
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id)});
+    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',
+      attachments:atts.map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))},th.turns.length);
+    th.att.clear();
     r.autoJudge=!!(CFG.judge&&JSEL.auto);
     foldOld(th);paintHead(th);openStream(r);fq.value='';fq.style.height='auto';
     r.el.scrollIntoView({behavior:'smooth',block:'start'})}
@@ -2140,9 +2543,11 @@ async function follow(th){
 function submitComposer(){
   const p=$('#prompt').value.trim();if(!p)return $('#prompt').focus();
   const tools=CFG.order.filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
+  if(COMPOSER_ATT.pending())return toast(T('att.pending'));
+  const atts=COMPOSER_ATT.items.filter(a=>a.state==='ok');
   send(p,tools,Object.fromEntries(tools.map(t=>[t,SEL[t].model||''])),Object.fromEntries(tools.map(t=>[t,SEL[t].effort||''])),
-    $('#tag').value.trim(),$('#cwd').value.trim())
-    .then(ok=>{if(ok){$('#prompt').value='';autosize()}});
+    $('#tag').value.trim(),$('#cwd').value.trim(),atts)
+    .then(ok=>{if(ok){$('#prompt').value='';autosize();COMPOSER_ATT.clear()}});
 }
 function autosize(){const p=$('#prompt');p.style.height='auto';p.style.height=Math.min(p.scrollHeight,innerHeight*.4)+'px'}
 $('#prompt').addEventListener('input',autosize);
@@ -2150,7 +2555,7 @@ $('#prompt').addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key==='
 $('#go').onclick=submitComposer;
 $('#collapseAll').onclick=()=>{for(const th of ROUNDS.values())if(th.open)setOpen(th,false)};
 const pj=(v,d)=>typeof v==='string'?(()=>{try{return JSON.parse(v||'null')??d}catch(e){return d}})():(v||d);
-const norm=m=>({...m,tools:pj(m.tools,[]),models:pj(m.models,{}),efforts:pj(m.efforts,{})});
+const norm=m=>({...m,tools:pj(m.tools,[]),models:pj(m.models,{}),efforts:pj(m.efforts,{}),attachments:pj(m.attachments,[])});
 async function loadFeed(){
   const d=await api('/api/history?limit=20');feed.innerHTML='';ROUNDS.clear();TURNS.clear();
   for(const m of d.runs)feed.appendChild(makeRound(norm(m)).el);
@@ -2189,7 +2594,7 @@ async function loadHistory(){
   const d=await api(`/api/history?q=${encodeURIComponent($('#hq').value)}&tag=${encodeURIComponent($('#htag').value)}`);
   $('#hlist').innerHTML=d.runs.map(r=>`<li class="hitem"><div class="hmain"><div class="hq">${esc(r.prompt)}</div>
     <div class="hmeta"><time>${fmtTime(r.created_at)}</time>${r.tag?`<span class="chip">${esc(r.tag)}</span>`:''}
-    ${r.nturns>1?`<span class="chip">${T('rounds',r.nturns)}</span>`:''}${(r.last_winner||r.winner)?`<span class="chip win">${winText(r.last_winner||r.winner)}</span>`:''}<span>${esc(r.scores||T('h.unrated'))}</span></div></div>
+    ${r.nturns>1?`<span class="chip">${T('rounds',r.nturns)}</span>`:''}${(r.attachments||[]).length?`<span class="chip">📎 ${r.attachments.length}</span>`:''}${(r.last_winner||r.winner)?`<span class="chip win">${winText(r.last_winner||r.winner)}</span>`:''}<span>${esc(r.scores||T('h.unrated'))}</span></div></div>
     <div class="hact"><button class="btn sm" data-a="open" data-id="${esc(r.id)}">${T('h.open')}</button><button class="btn sm ghost" data-a="del" data-id="${esc(r.id)}">${T('h.del')}</button></div></li>`).join('')
     ||`<li class="hitem" style="color:var(--muted)">${T('h.none')}</li>`;
 }
@@ -2265,6 +2670,7 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
   CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
+  COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>
@@ -2304,6 +2710,7 @@ def main():
         migrate(c)
         c.close()
     load_cfg()
+    cleanup_staging()
     threading.Thread(target=refresh_models, daemon=True).start()
     srv = SRV = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     srv.daemon_threads = True
