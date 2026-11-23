@@ -9,9 +9,10 @@ AI Arena runs locally as a single Python file with no dependencies beyond the st
 ## Features
 
 - **Side-by-side streaming**: answers stream into three columns, each showing the model actually used, elapsed time and status. Switch between formatted Markdown and raw text.
-- **Chat mode** (on by default): all three tools are coding agents whose built-in instructions favor short answers. Chat mode adds the same instruction to every tool, asking it to answer like a general-purpose assistant with a complete, structured answer. Your question is stored as typed, and follow-ups keep the setting.
+- **Chat mode** (on by default): all three tools are coding agents whose built-in instructions favor short answers. Chat mode adds the same instruction to every tool, asking it to answer like a general-purpose assistant with a complete, structured answer; for advice or a plan, it asks for a recommendation and an example you can follow. Every tool gets identical instructions, so the comparison stays fair. Your question is stored as typed, and follow-ups keep the setting.
 - **Attachments**: click the paperclip, drag files onto the question box, or paste them, to attach Word, Excel, PowerPoint, PDF, CSV, text or image files (up to 50 MB each), on the first question or a follow-up. AI Arena extracts the text and sends the same content to every tool, so the comparison stays fair. It also gives each tool the path of the original file so it can open images, charts or layout itself. Attachments show on each round and open with a click; **Rerun** reuses them, and Grok sees the same text when scoring. See [Attachments](#attachments).
-- **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered.
+- **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered. Antigravity's list is read from `agy models` at startup, so it shows the models your Google plan includes (for example Gemini 4 Neon), and the last list is cached in `models_cache.json`.
+- **Optional OpenAI GPT column**: compare GPT-6.2 Sol or Astra through the OpenAI Responses API. It is hidden unless you set `ARENA_OPENAI_API_KEY` and turn on **Show OpenAI GPT** on the Setup page. It uses separate API credits, not a ChatGPT subscription. See [OpenAI API column](#openai-api-column).
 - **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If a tool has no session ID from the last round, the earlier Q&A is added before the question instead. With **Include the other answers** (on by default), each tool also gets the other models' answers from the previous round, labeled by model, so you can ask them to compare, critique or combine the answers. Turn it off when you want each tool to answer on its own; rounds that saw the other answers are marked.
 - **Conversation feed**: each card is a conversation. Older rounds fold automatically, and a three-color bar on each card shows how each tool did in the latest round.
 - **Reader mode**: expand long answers in place, or open a wide reading view and use ← → to switch between models.
@@ -66,12 +67,22 @@ Pull the latest code (or replace `arena.py` and `arena.html`), then click **Quit
 - If you leave **Working folder** empty, the tools run in the attachments folder. If you set one, Claude and Antigravity also get `--add-dir` for the attachments folder; Codex can read the path in its default sandbox.
 - A scanned PDF has no text layer. The tools can still open it, but only models that read images will see the content.
 
+## OpenAI API column
+
+The OpenAI column calls the Responses API directly (`arena_openai.py`). The key is read only from the environment variable `ARENA_OPENAI_API_KEY`; it is never written to the config file or the database, and only this one request process receives it.
+
+- From Terminal: `ARENA_OPENAI_API_KEY=… python3 arena.py`
+- With the macOS app: run `launchctl setenv ARENA_OPENAI_API_KEY …`, then start the app. The app does not read `~/.zshrc`, and the `launchctl` setting lasts until you log out.
+
+Requests are sent with `store: false`. Attachments are sent as extracted text only, because the API cannot open files on your computer. Follow-ups replay the earlier Q&A, since there is no CLI session to resume.
+
 ## Files
 
 | File | Purpose |
 |---|---|
 | `arena.py` | Backend (HTTP, SSE streaming, SQLite) with a built-in copy of the web page |
 | `arena.html` | Web interface; used instead of the built-in copy when it sits next to `arena.py`, so you can edit it separately |
+| `arena_openai.py` | Helper that sends one request to the OpenAI Responses API (used only by the optional OpenAI column) |
 | `macos/AI Arena.app` | macOS launcher |
 
 Created on first run and excluded by `.gitignore`:
@@ -80,6 +91,7 @@ Created on first run and excluded by `.gitignore`:
 - `arena.db`: history, ratings and scores (SQLite).
 - `arena.log`: launcher log.
 - `attachments/`: files you attached, one folder per round.
+- `models_cache.json`: the last model list read from `agy models`.
 
 ## Configuration
 
@@ -101,7 +113,9 @@ Created on first run and excluded by `.gitignore`:
 | `model_flag` / `models` | Option used to pass the model, and the models offered in the picker |
 | `effort_args` / `efforts` | Arguments used to pass effort (`{effort}` is replaced), and the levels offered |
 | `resume_args` / `resume_pos` | Arguments used to continue a session for follow-ups (`{session}` is replaced) |
-| `models_cmd` | Command that lists available models at runtime, e.g. `agy models` |
+| `models_cmd` | Command that lists available models at runtime, e.g. `agy models` (runs in a pseudo-terminal when `pty` is set; the result is logged to `arena.log`) |
+| `strip_env` | Environment variables removed before the tool starts. Claude removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so it always uses your claude.ai sign-in |
+| `default_on: false` | Leave the tool unselected for new questions |
 | `pty: true` | Run in a pseudo-terminal (Antigravity CLI can hang without a terminal) |
 | `install_script` / `package` | One-click install method: a shell script, or an npm package |
 | `role: "judge"` | Use this tool for scoring instead of competing (Grok by default) |
@@ -113,6 +127,8 @@ Created on first run and excluded by `.gitignore`:
 |---|---|
 | A column says **Not installed** | Open **Setup**, click **Install**, then **Sign in**. If the tool is installed somewhere unusual, put its full path in `arena_config.json`. |
 | Answers are much shorter than in the ChatGPT, Claude or Gemini apps | The CLIs are coding agents tuned for brevity, and the apps also use your personal memory. Turn on **Chat mode**. |
+| Claude fails with **Invalid API key** | An `ANTHROPIC_API_KEY` from the environment took priority over your claude.ai sign-in. AI Arena now removes it before starting Claude (the process log says so). If it still fails, the key comes from somewhere else, such as `apiKeyHelper` in `~/.claude/settings.json`; run `claude` and type `/status` to see which sign-in it uses. Start AI Arena from the app rather than from another AI tool's terminal, which may carry its own keys. |
+| Antigravity's model list only shows **Default** | `agy models` needs a signed-in session. Sign in on the Setup page and restart AI Arena. If the list is still empty, `arena.log` contains the raw output of `agy models`. |
 | Codex stays on **Generating** for a long time | Codex waits instead of failing when you are not signed in. Click **Sign in** for Codex on the Setup page. |
 | An answer column is empty but marked **Done** | Open its **Process log**. If the output format was not recognized, the raw output is written there. |
 | An attachment says **No text extracted** | It is an image, a scanned PDF or an unsupported format. The tools still get the file path. For a PDF on Linux, install `poppler-utils` for `pdftotext`. |
@@ -126,6 +142,7 @@ Created on first run and excluded by `.gitignore`:
 - The server listens on `127.0.0.1` only. Each start creates a random token, and the Host header is checked, so other web pages cannot call your local CLIs.
 - Model output is sanitized with DOMPurify before it is rendered.
 - Scoring hides which model wrote each answer, but an answer that names itself (for example, "As Claude…") can still give it away.
+- The OpenAI API key is read only from the environment, passed only to the OpenAI request process, and never stored. Claude, Codex and Antigravity do not see it.
 - Attachments stay on your computer, but their content is sent to every selected tool (and to Grok when scoring). Don't attach anything you would not paste into those services.
 - If you set a working folder, the CLIs may change files in it. When comparing coding tasks, point it at a copy.
 

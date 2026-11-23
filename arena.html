@@ -351,6 +351,9 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 
 <section id="v-env" class="page" hidden>
   <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
+  <div class="bar" id="openaiPreference" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">显示 OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列</span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -423,7 +426,7 @@ const I18N={zh:{
  'att.btn':'添加附件','att.title':'添加附件：Word、Excel、PowerPoint、PDF、文本、图片等。也可以把文件拖进来，或直接粘贴。',
  'att.uploading':'上传中','att.chars':'已提取 {0} 字','att.image':'图片，工具可直接查看','att.noText':'没提取到文字，工具可打开原文件',
  'att.fail':'上传失败','att.remove':'移除','att.pending':'附件还在上传，请稍等','att.tooBig':'{0} 超过 50 MB，无法添加','att.open':'打开原文件','att.count':'{0} 个附件',
- 'chat.label':'聊天模式','chat.title':'让所有工具都像通用助手（而不是编程助手）那样完整作答：给出有结构、可以照着做的回答。追问会沿用这个设置。','chat.chip':'聊天模式'
+ 'chat.label':'聊天模式','chat.title':'适合日常问答。所有工具收到同样的要求：像通用助手那样完整作答，方案类问题给出推荐和可以照着做的例子。追问沿用此设置。','e.showOpenai':'显示 OpenAI GPT','e.openaiNoKey':'需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列','t.enableOpenai':'请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。','lane.apiKey':'需要 API Key','lane.apiSetup':'设置 ARENA_OPENAI_API_KEY 后重启。选用此线路时使用独立 API 额度。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
  'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
@@ -464,7 +467,7 @@ const I18N={zh:{
  'att.btn':'Attach files','att.title':'Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.',
  'att.uploading':'Uploading','att.chars':'{0} characters extracted','att.image':'Image; tools can open it','att.noText':'No text extracted; tools can open the file',
  'att.fail':'Upload failed','att.remove':'Remove','att.pending':'Attachments are still uploading. Please wait.','att.tooBig':'{0} is larger than 50 MB and cannot be added','att.open':'Open the original file','att.count':'{0} attachments',
- 'chat.label':'Chat mode','chat.title':'Ask every tool to answer like a general-purpose assistant rather than a coding agent, with complete, structured answers you can act on. Follow-ups keep this setting.','chat.chip':'Chat mode'
+ 'chat.label':'Chat mode','chat.title':'For everyday questions. Every tool gets the same instructions: answer like a general-purpose assistant, and for plans give a recommendation and an example you can follow. Follow-ups keep this setting.','e.showOpenai':'Show OpenAI GPT','e.openaiNoKey':'Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare','t.enableOpenai':'Show OpenAI GPT in Environment, then select it in Compare.','lane.apiKey':'API key required','lane.apiSetup':'Set ARENA_OPENAI_API_KEY for Arena, then restart. This option uses separate API credits.','chat.chip':'Chat mode'
 }};
 const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
 let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
@@ -494,25 +497,30 @@ function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.te
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
 /* ---------- 配置与模型选择 ---------- */
-let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={};
+let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
+const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // 没设置 API Key 时一律不显示
+const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
+const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
 const color=t=>CFG.tools[t]?.color||'#8893a3';
 const EFF_ZH={minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'很高',max:'最高'};
 const effLabel=e=>e?(LANG==='en'?e:`${e} ${EFF_ZH[e]||''}`.trim()):'';
 const dlabel=t=>{const v=CFG.tools[t]||{};return (LANG==='en'?v.default_label_en:v.default_label)||T('default')};
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 function renderLanes(){
-  $('#lanes').style.gridTemplateColumns=`repeat(${CFG.order.length},minmax(0,1fr))`;
-  $('#lanes').innerHTML=CFG.order.map(t=>{const v=CFG.tools[t],sel=SEL[t];
-    const opts=[{id:'',label:dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
+  const tools=visibleTools();
+  $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
+  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t];
+    const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
-      <button class="lsw" role="switch" aria-checked="${sel.on}" title="${esc(T('lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
-      <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag?'':`disabled title="${esc(T('lane.noModel'))}"`}>
+      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
+      <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
-      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}">
+      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
         <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(LANG==='en'?e:(EFF_ZH[e]||''))}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
+  if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
   SEL[t].on=!SEL[t].on;ls.set('arenaSel',SEL);renderLanes()});
 $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(!s)return;const t=s.closest('.lane').dataset.t;
   if(s.classList.contains('eff')){SEL[t].effort=s.value;ls.set('arenaSel',SEL);renderLanes();return}
@@ -685,6 +693,14 @@ function paintWinner(r){const w=r.winner;
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
+/* ---------- 动态模型列表（agy models 在后台读取，读到后补进下拉框） ---------- */
+function modelsLater(n){
+  if(n>=6||!CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length))return;
+  setTimeout(async()=>{try{const c=await api('/api/config');let got=false;
+    for(const t of CFG.order)if(CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length&&(c.tools[t]?.models||[]).length){CFG.tools[t].models=c.tools[t].models;got=true}
+    if(got)renderLanes()}catch(e){}modelsLater(n+1)},10000);
+}
+
 /* ---------- 附件 ---------- */
 const fmtSize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
 const kindTag=a=>({Word:'DOC',Excel:'XLS',PowerPoint:'PPT',PDF:'PDF',RTF:'RTF',ODT:'ODT',CSV:'CSV',image:'IMG',text:'TXT'}[a.kind]||(a.ext||'').replace('.','').slice(0,4).toUpperCase()||'FILE');
@@ -784,6 +800,8 @@ function renderConflicts(r,j){  // 共识和分歧：每家的说法放在对应
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd,atts,copyFrom){
+  tools=tools.filter(t=>t!=='openai'||openaiSelected());
+  if(!tools.length){toast(T('t.enableOpenai'));return false}
   try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT,attachments:(atts||[]).map(a=>a.id),copy_attachments_from:copyFrom||''});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
     const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0,
@@ -799,7 +817,7 @@ async function follow(th){
   if(th.turns.some(r=>r.running))return toast(T('t.busy'));
   if(th.att.pending())return toast(T('att.pending'));
   const atts=th.att.items.filter(a=>a.state==='ok');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS});
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS,include_openai:openaiSelected()});
     const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',peers:d.peers||0,
       attachments:atts.map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))},th.turns.length);
     th.att.clear();
@@ -810,7 +828,7 @@ async function follow(th){
 }
 function submitComposer(){
   const p=$('#prompt').value.trim();if(!p)return $('#prompt').focus();
-  const tools=CFG.order.filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
+  const tools=visibleTools().filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
   if(COMPOSER_ATT.pending())return toast(T('att.pending'));
   const atts=COMPOSER_ATT.items.filter(a=>a.state==='ok');
   send(p,tools,Object.fromEntries(tools.map(t=>[t,SEL[t].model||''])),Object.fromEntries(tools.map(t=>[t,SEL[t].effort||''])),
@@ -900,6 +918,9 @@ async function loadEnv(){
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
+    if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
+      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
+      <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
     const hint=LANG==='en'?(t.hint_en||t.hint):t.hint;
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
@@ -934,10 +955,27 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   applyI18n();
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
-  for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if(SEL.openai){
+    const setting=$('#showOpenai');
+    $('#openaiPreference').hidden=false;
+    $('#openaiKeyNote').hidden=CFG.tools.openai.ready!==false;
+    setting.checked=SHOW_OPENAI;
+    if(!SHOW_OPENAI)SEL.openai.on=false;
+    setting.onchange=()=>{
+      SHOW_OPENAI=setting.checked;
+      ls.set('arenaShowOpenai',SHOW_OPENAI);
+      SEL.openai.on=false;
+      ls.set('arenaSel',SEL);
+      const row=$('[data-openai-row]');
+      if(row)row.hidden=!SHOW_OPENAI;
+      renderLanes();
+    };
+  }
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
   CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
+  modelsLater(0);
   COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();

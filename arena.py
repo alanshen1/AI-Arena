@@ -40,6 +40,7 @@ DEFAULT_CFG = {
             "package": "@anthropic-ai/claude-code",
             "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit", "hint_en": "Follow the prompts to sign in, then type /exit",
             "resume_args": ["--resume", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
+            "strip_env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             "model_flag": "--model", "default_label": "默认（账户默认）", "default_label_en": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
@@ -55,6 +56,13 @@ DEFAULT_CFG = {
                   "models": [{"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"}, {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"},
                              {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"}, {"id": "gpt-6.1-terra", "label": "GPT-6.1 Terra"},
                              {"id": "gpt-6-luna", "label": "GPT-6 Luna"}]},
+        "openai": {"label": "OpenAI GPT", "cmd": ["openai-responses", "{prompt}"],
+                   "transport": "openai_responses", "default_on": False, "color": "#087e84",
+                   "model_flag": "--model", "default_label": "默认（GPT-6.2 Sol）",
+                   "default_label_en": "Default (GPT-6.2 Sol)",
+                   "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh"],
+                   "models": [{"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"},
+                              {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"}]},
         "antigravity": {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
             "parser": "agy_stream", "color": "#7b61ff",
@@ -120,6 +128,8 @@ MSG = {
     "judge_exit": ("{label} 退出码 {code}", "{label} exited with code {code}"),
     "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
     "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
+    "env_stripped": ("[认证] 已忽略环境变量 {names}，使用命令行工具自己的登录\n",
+                     "[auth] Ignored the environment variable {names}; using the CLI's own sign-in\n"),
     "chat_note": ("[聊天模式] 已要求像通用助手那样完整作答\n", "[chat mode] Asked to answer like a general-purpose assistant\n"),
     "too_big": ("文件太大（上限 {mb} MB）", "File too large (limit {mb} MB)"),
     "attach_missing": ("附件不存在或已过期，请重新添加：{name}", "Attachment missing or expired; add it again: {name}"),
@@ -188,6 +198,7 @@ def load_cfg():
                 sp["parser"] = DEFAULT_CFG["tools"]["codex"]["parser"]
         cfg["version"] = 4
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    tools.setdefault("openai", copy.deepcopy(DEFAULT_CFG["tools"]["openai"]))
     for name, spec in tools.items():  # 旧配置补上新字段
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
             spec.setdefault(k, copy.deepcopy(v))
@@ -196,6 +207,10 @@ def load_cfg():
 
 def enabled_tools(cfg):  # 参赛工具（不含评分模型）
     return [n for n, sp in cfg["tools"].items() if sp.get("enabled", True) and sp.get("role") != "judge"]
+
+
+def openai_ready():
+    return bool(os.environ.get("ARENA_OPENAI_API_KEY", "").strip())
 
 
 def judge_tool(cfg):
@@ -233,33 +248,94 @@ class PtyText:
 
 
 MODEL_CACHE = {}  # 由 models_cmd（如 agy models）动态读取的模型列表
+MODELS_FILE = Path(os.environ.get("ARENA_MODELS", HERE / "models_cache.json"))  # 上次读到的列表，启动时先用它
 SLUG_RE = re.compile(r"\b([a-z][a-z0-9]*(?:[.-][a-z0-9]+)+)\b")
+NAME_RE = re.compile(r"^((?:Gemini|Claude|GPT|Orchestrator)\b[\w .()\-]*?)\s*$", re.I)
+EFFORT_SUFFIX = re.compile(r"-(?:minimal|low|medium|high|xhigh|max)$")
+MODELS_LOCK = threading.Lock()
+
+try:
+    MODEL_CACHE.update(json.loads(MODELS_FILE.read_text(encoding="utf-8")))
+except (OSError, ValueError):
+    pass
+
+
+def parse_models(text):
+    """解析 `agy models` 这类输出：优先取模型 ID（gemini-4-neon），没有 ID 时用显示名称。"""
+    text = ANSI_RE.sub("", text or "").replace("\r", "")
+    t = text.strip()
+    if t[:1] in "[{":  # JSON 输出
+        try:
+            data = json.loads(t)
+            items = data if isinstance(data, list) else data.get("models") or []
+            out = []
+            for x in items:
+                if isinstance(x, str):
+                    out.append({"id": x, "label": x})
+                elif isinstance(x, dict):
+                    i = x.get("id") or x.get("name") or x.get("model")
+                    if i:
+                        out.append({"id": str(i), "label": str(x.get("display_name") or x.get("label") or x.get("title") or i)})
+            return out
+        except ValueError:
+            pass
+    models = []
+    for ln in text.splitlines():
+        ln = ln.strip(" \t│|*•>✓✔●○")
+        if not ln or ln.lower().startswith(("available", "usage", "model ", "models", "id ", "name ")):
+            continue
+        m = SLUG_RE.search(ln)
+        if m and "-" in m.group(1):
+            rest = (ln[:m.start()] + ln[m.end():]).strip(" \t-*•:|│")
+            if rest.startswith("(") and rest.endswith(")"):
+                rest = rest[1:-1].strip()
+            rest = re.sub(r"\s{2,}.*$", "", rest)  # 表格里后面的列（如额度说明）去掉
+            if rest.lower().strip("()[] ") in ("default", "current", "selected", "active", "默认", "当前"):
+                rest = ""
+            models.append({"id": m.group(1), "label": rest or m.group(1)})
+            continue
+        n = NAME_RE.match(re.split(r"\s{2,}|\t", ln)[0])
+        if n:  # 只有显示名称，如 "Gemini 4 Neon"、"Orchestrator (Neon)"
+            models.append({"id": n.group(1).strip(), "label": n.group(1).strip()})
+    ids = {x["id"] for x in models}
+    # 同一个模型按思考档位列了多个 ID（gemini-4-neon-high…）而基础 ID 也在时，只留基础 ID，档位用 Effort 选
+    models = [x for x in models if not (EFFORT_SUFFIX.search(x["id"]) and EFFORT_SUFFIX.sub("", x["id"]) in ids)]
+    return list({x["id"]: x for x in models}.values())
 
 
 def refresh_models():
-    cfg = load_cfg()
-    for name in enabled_tools(cfg):
-        spec = cfg["tools"][name]
-        mc = spec.get("models_cmd")
-        exe = mc and which(mc[0])
-        if not exe:
-            continue
-        try:
-            r = subprocess.run([exe] + mc[1:], capture_output=True, text=True, timeout=20,
-                               env=child_env(), stdin=subprocess.DEVNULL)
-        except Exception:
-            continue
-        models = []
-        for ln in ANSI_RE.sub("", r.stdout).splitlines():
-            m = SLUG_RE.search(ln)
-            if not m or "-" not in m.group(1):
+    if not MODELS_LOCK.acquire(blocking=False):
+        return
+    try:
+        cfg = load_cfg()
+        changed = False
+        for name in enabled_tools(cfg):
+            spec = cfg["tools"][name]
+            mc = spec.get("models_cmd")
+            exe = mc and which(mc[0])
+            if not exe:
                 continue
-            rest = (ln[:m.start()] + ln[m.end():]).strip(" \t-*•:|")
-            if rest.startswith("(") and rest.endswith(")"):
-                rest = rest[1:-1].strip()
-            models.append({"id": m.group(1), "label": rest or m.group(1)})
-        if models:
-            MODEL_CACHE[name] = list({x["id"]: x for x in models}.values())
+            try:  # agy 在非终端环境下可能卡住，和问答一样按 pty 设置运行
+                rc, out, err = run_streaming(exe, mc[1:], spec, tempfile.mkdtemp(prefix="arena-models-"), 40, lambda t: None)
+            except Exception as e:
+                print(f"[models] {name}: {e}", flush=True)
+                continue
+            models = parse_models(out)
+            if models:
+                print(f"[models] {name}: {len(models)} models: " + ", ".join(x["id"] for x in models), flush=True)
+                if MODEL_CACHE.get(name) != models:
+                    MODEL_CACHE[name], changed = models, True
+            else:  # 没解析出来：把原始输出写进 arena.log，方便排查格式
+                raw = ANSI_RE.sub("", out + ("\n[stderr] " + err if (err or "").strip() else "")).strip()
+                print(f"[models] {name}: exit={'timeout' if rc is None else rc}, nothing parsed. Raw output:\n"
+                      f"{raw[:3000] or '(empty)'}", flush=True)
+        if changed:
+            try:
+                MODELS_FILE.write_text(json.dumps(MODEL_CACHE, ensure_ascii=False, indent=1), encoding="utf-8")
+            except OSError:
+                pass
+    finally:
+        MODELS_LOCK.release()
 
 
 # ---------------- 命令查找（Finder 启动时 PATH 很短，需要主动搜常见安装位置） ----------------
@@ -307,6 +383,7 @@ PATH_CACHE = search_path()
 def child_env():
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)  # 允许在 Claude Code 终端里启动
+    env.pop("ARENA_OPENAI_API_KEY", None)
     env.update(NO_COLOR="1", FORCE_COLOR="0", PATH=PATH_CACHE)
     return env
 
@@ -325,6 +402,10 @@ def doctor(lang="zh"):
 
     def check(name, spec):
         exe = spec["cmd"][0]
+        if spec.get("transport") == "openai_responses":
+            res[name] = {"name": name, "api": True, "ready": openai_ready(), "path": "api.openai.com",
+                         "version": "Responses API"}
+            return
         path, ver = which(exe), ""
         if path:
             try:
@@ -745,12 +826,17 @@ PARSERS = {"claude_stream": lambda lang="zh": ClaudeStream(), "codex_json": Code
 
 CHAT_PREFIX = {
     "zh": ("请像通用 AI 助手（而不是编程助手）那样回答下面的问题：给出完整、有结构、可以直接照着做的回答，"
-           "包括具体做法、数字或例子；需要时用标题、列表或表格。除了查看下面列出的附件，不要读写本地文件，"
-           "也不要执行命令，除非问题确实需要。用提问所用的语言回答。\n\n"),
+           "需要时用标题、列表或表格。如果问的是建议、计划或方案，先直接给出推荐，再给一个足以照着执行的具体例子，"
+           "按需要写清步骤、数量或范围、可替换的选项，以及什么情况下怎么调整。缺少个人信息时，说明你假设的前提和适用范围。"
+           "提问者指定了篇幅就按要求来；简单的事实问题简短回答即可。"
+           "除了查看下面列出的附件，不要读写本地文件，也不要执行命令，除非问题确实需要。用提问所用的语言回答。\n\n"),
     "en": ("Answer the question below the way a general-purpose AI assistant would, not as a coding agent: give a complete, "
-           "well-structured answer the person can act on, with concrete steps, numbers or examples; use headings, lists or "
-           "tables where they help. Apart from viewing the attachments listed below, do not read or write local files or run "
-           "commands unless the question really needs it. Answer in the language of the question.\n\n"),
+           "well-structured answer the person can act on, using headings, lists or tables where they help. For advice, a plan "
+           "or a proposal, give your recommendation first, then a concrete example detailed enough to follow, with steps, "
+           "quantities or ranges, alternatives and how to adjust them as relevant. If personal details are missing, state your "
+           "assumptions and who the answer suits. Follow any length the person asks for, and keep simple factual answers short. "
+           "Apart from viewing the attachments listed below, do not read or write local files or run commands unless the "
+           "question really needs it. Answer in the language of the question.\n\n"),
 }
 Q_LABEL = {"zh": "问题：\n", "en": "Question:\n"}
 
@@ -1085,6 +1171,9 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         extra += [spec["model_flag"], model]
     if effort and spec.get("effort_args"):
         extra += [a.replace("{effort}", effort) for a in spec["effort_args"]]
+    if (chat and name == "codex" and base[1:2] == ["exec"]
+            and not any(arg.startswith("model_verbosity=") for arg in (*base, *extra))):
+        extra += ["-c", 'model_verbosity="high"']
     rargs = [a.replace("{session}", session) for a in spec.get("resume_args") or []] if session else []
     if rargs and spec.get("resume_pos") != "prompt":
         extra += rargs
@@ -1107,10 +1196,17 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         prompt = attach + pblock + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
     if pblock:
         note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
-    if chat:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
+    uses_openai = spec.get("transport") == "openai_responses"
+    if chat and not uses_openai:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
         prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach or pblock else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
+    if uses_openai:
+        options = ["--lang", lang]
+        if chat:
+            options += ["--instructions", CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]).strip()]
+            note += M(lang, "chat_note")
+        cmd = [sys.executable, str(HERE / "arena_openai.py"), *options, *cmd[1:-1]]
     shown = " ".join(shlex.quote(a) for a in base)
     out, log, t0, status = [], [], time.time(), "ok"
     actual, errhead, sess = [""], [""], [""]
@@ -1118,16 +1214,26 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if attach:
         note += M(lang, "attach_note", n=attach.count("\n【附件 ") + attach.count("\n[Attachment ") or 1,
                   chars=f"{len(attach):,}")
+    env = child_env()
+    stripped = [k for k in spec.get("strip_env") or [] if env.pop(k, None) is not None]
+    if stripped:  # 例如 ANTHROPIC_API_KEY 会盖过 claude.ai 订阅登录
+        note += M(lang, "env_stripped", names=", ".join(stripped))
     if note:
         log.append(note)
         run.emit({"tool": name, "type": "log", "data": note})
-    env = child_env()
-    exe = which(cmd[0])
+    if uses_openai:
+        env["OPENAI_API_KEY"] = os.environ.get("ARENA_OPENAI_API_KEY", "")
+    exe = sys.executable if uses_openai else which(cmd[0])
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     out_fd = None
+    api_input = None
     try:
         if not exe:
             raise FileNotFoundError(cmd[0])
+        if uses_openai:
+            api_input = tempfile.TemporaryFile()
+            api_input.write(prompt.encode("utf-8"))
+            api_input.seek(0)
         if use_pty:
             import pty, termios, fcntl, struct
             out_fd, slave = pty.openpty()
@@ -1143,13 +1249,17 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
                 os.close(slave)
         else:
             p = subprocess.Popen([exe] + cmd[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 stdin=subprocess.DEVNULL, cwd=cwd, env=env, start_new_session=(os.name == "posix"))
+                                 stdin=api_input if uses_openai else subprocess.DEVNULL,
+                                 cwd=cwd, env=env, start_new_session=(os.name == "posix"))
     except FileNotFoundError:
         p, status = None, "未安装"
         log.append(M(lang, "cmd_missing", exe=cmd[0], cfg=CFG_PATH.name))
     except Exception as e:
         p, status = None, "启动失败"
         log.append(f"{e}\n")
+    finally:
+        if api_input is not None:
+            api_input.close()
     if p:
         run.procs[name] = p
         parser = PARSERS[spec["parser"]](lang) if spec.get("parser") in PARSERS else None
@@ -1529,7 +1639,7 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
 
 
 def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh",
-              chat=False, attachments=None, share_peers=True):
+              chat=False, attachments=None, share_peers=True, include_openai=True):
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories, prev = "", "", {}, {}, []
@@ -1538,8 +1648,13 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         if not p:
             raise ValueError(M(lang, "parent_missing"))
         thread, parent_id = p.get("thread") or p["id"], p["id"]
-        q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         tools = json.loads(p["tools"] or "[]")
+        if not include_openai and "openai" in tools:
+            tools = [t for t in tools if t != "openai" and t in on]
+            if not tools:
+                raise ValueError("Show and select OpenAI GPT before continuing this thread." if lang == "en"
+                                 else "请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。")
+        q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         models, efforts = json.loads(p.get("models") or "{}"), json.loads(p.get("efforts") or "{}")
         cwd, tag, chat = p.get("cwd") or None, p.get("tag") or "", bool(p.get("chat"))
         for t in tools:
@@ -1557,7 +1672,9 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                     m = o.get("actual_model") or o.get("model") or ""
                     prev.append((o["tool"], f"{label}（{m}）" if m and lang != "en" else f"{label} ({m})" if m else label,
                                  o["output"]))
-    tools = [t for t in tools if t in on] or on
+    tools = [t for t in tools if t in on] or [t for t in on if cfg["tools"][t].get("default_on", True)]
+    if not tools:
+        raise ValueError("Select at least one tool." if lang == "en" else "至少选择一个参赛工具。")
     for rid0 in [k for k, r in RUNS.items() if r.finished_at and time.time() - r.finished_at > 1800]:
         RUNS.pop(rid0, None)  # 完成 30 分钟后从内存移除，之后从数据库回放
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
@@ -1566,6 +1683,9 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                for t in tools}
     metas = claim_attachments(attachments, rid, lang) if attachments else []
     attach = attachment_block(metas, lang)
+    api_attach = attachment_block(metas, lang, with_paths=False) if any(
+        cfg["tools"][t].get("transport") == "openai_responses" for t in tools
+    ) else ""
     attach_dir = str(ATTACH_DIR / rid) if metas else ""
     run_cwd = cwd or attach_dir or None  # 没指定工作目录时，在附件目录里运行，工具能直接读到附件
     peers = {t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
@@ -1578,10 +1698,13 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
     for t in tools:
-        threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, run_cwd, cfg.get("timeout", 600),
+        spec = cfg["tools"][t]
+        uses_openai = spec.get("transport") == "openai_responses"
+        threading.Thread(target=exec_tool, args=(run, t, spec, prompt, run_cwd, cfg.get("timeout", 600),
                                                  models[t], efforts[t], sessions.get(t, ""),
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
-                                                 peers.get(t), attach, attach_dir if cwd else ""),
+                                                 peers.get(t), api_attach if uses_openai else attach,
+                                                 attach_dir if cwd and not uses_openai else ""),
                          daemon=True).start()
     return rid, tools, models, efforts, shared
 
@@ -1680,9 +1803,12 @@ class H(BaseHTTPRequestHandler):
             tags = [r["tag"] for r in q("SELECT DISTINCT tag FROM runs WHERE tag<>'' ORDER BY tag")]
             self._json({"tools": {k: {"color": v.get("color", "#888"), "label": v.get("label") or k.capitalize(),
                                       "models": MODEL_CACHE.get(k) or v.get("models", []),
+                                      "dynamic": bool(v.get("models_cmd")),
                                       "flag": bool(v.get("model_flag")), "default_label": v.get("default_label", "默认"),
                                       "default_label_en": v.get("default_label_en") or "Default",
-                                      "efforts": v.get("efforts", []) if v.get("effort_args") else []}
+                                      "efforts": v.get("efforts", []) if v.get("effort_args") else [],
+                                      "default_on": v.get("default_on", True),
+                                      "ready": v.get("transport") != "openai_responses" or openai_ready()}
                                   for k, v in cfg["tools"].items()},
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
         elif p.startswith("/api/file/"):  # 打开某一轮的附件原文件
@@ -1772,7 +1898,8 @@ class H(BaseHTTPRequestHandler):
                 try:
                     rid, tools, models, efforts, shared = start_run(
                         prompt, [], None, "", parent=str(b["parent"]), judge=jflag, judge_model=jmodel, lang=self.lang,
-                        attachments=att, share_peers=b.get("share_peers", True) is not False)
+                        attachments=att, share_peers=b.get("share_peers", True) is not False,
+                        include_openai=b.get("include_openai", True) is not False)
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
                 return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"],
@@ -2221,6 +2348,9 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 
 <section id="v-env" class="page" hidden>
   <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
+  <div class="bar" id="openaiPreference" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">显示 OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列</span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -2293,7 +2423,7 @@ const I18N={zh:{
  'att.btn':'添加附件','att.title':'添加附件：Word、Excel、PowerPoint、PDF、文本、图片等。也可以把文件拖进来，或直接粘贴。',
  'att.uploading':'上传中','att.chars':'已提取 {0} 字','att.image':'图片，工具可直接查看','att.noText':'没提取到文字，工具可打开原文件',
  'att.fail':'上传失败','att.remove':'移除','att.pending':'附件还在上传，请稍等','att.tooBig':'{0} 超过 50 MB，无法添加','att.open':'打开原文件','att.count':'{0} 个附件',
- 'chat.label':'聊天模式','chat.title':'让所有工具都像通用助手（而不是编程助手）那样完整作答：给出有结构、可以照着做的回答。追问会沿用这个设置。','chat.chip':'聊天模式'
+ 'chat.label':'聊天模式','chat.title':'适合日常问答。所有工具收到同样的要求：像通用助手那样完整作答，方案类问题给出推荐和可以照着做的例子。追问沿用此设置。','e.showOpenai':'显示 OpenAI GPT','e.openaiNoKey':'需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列','t.enableOpenai':'请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。','lane.apiKey':'需要 API Key','lane.apiSetup':'设置 ARENA_OPENAI_API_KEY 后重启。选用此线路时使用独立 API 额度。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
  'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
@@ -2334,7 +2464,7 @@ const I18N={zh:{
  'att.btn':'Attach files','att.title':'Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.',
  'att.uploading':'Uploading','att.chars':'{0} characters extracted','att.image':'Image; tools can open it','att.noText':'No text extracted; tools can open the file',
  'att.fail':'Upload failed','att.remove':'Remove','att.pending':'Attachments are still uploading. Please wait.','att.tooBig':'{0} is larger than 50 MB and cannot be added','att.open':'Open the original file','att.count':'{0} attachments',
- 'chat.label':'Chat mode','chat.title':'Ask every tool to answer like a general-purpose assistant rather than a coding agent, with complete, structured answers you can act on. Follow-ups keep this setting.','chat.chip':'Chat mode'
+ 'chat.label':'Chat mode','chat.title':'For everyday questions. Every tool gets the same instructions: answer like a general-purpose assistant, and for plans give a recommendation and an example you can follow. Follow-ups keep this setting.','e.showOpenai':'Show OpenAI GPT','e.openaiNoKey':'Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare','t.enableOpenai':'Show OpenAI GPT in Environment, then select it in Compare.','lane.apiKey':'API key required','lane.apiSetup':'Set ARENA_OPENAI_API_KEY for Arena, then restart. This option uses separate API credits.','chat.chip':'Chat mode'
 }};
 const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
 let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
@@ -2364,25 +2494,30 @@ function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.te
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
 /* ---------- 配置与模型选择 ---------- */
-let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={};
+let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
+const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // 没设置 API Key 时一律不显示
+const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
+const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
 const color=t=>CFG.tools[t]?.color||'#8893a3';
 const EFF_ZH={minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'很高',max:'最高'};
 const effLabel=e=>e?(LANG==='en'?e:`${e} ${EFF_ZH[e]||''}`.trim()):'';
 const dlabel=t=>{const v=CFG.tools[t]||{};return (LANG==='en'?v.default_label_en:v.default_label)||T('default')};
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 function renderLanes(){
-  $('#lanes').style.gridTemplateColumns=`repeat(${CFG.order.length},minmax(0,1fr))`;
-  $('#lanes').innerHTML=CFG.order.map(t=>{const v=CFG.tools[t],sel=SEL[t];
-    const opts=[{id:'',label:dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
+  const tools=visibleTools();
+  $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
+  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t];
+    const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
-      <button class="lsw" role="switch" aria-checked="${sel.on}" title="${esc(T('lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
-      <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag?'':`disabled title="${esc(T('lane.noModel'))}"`}>
+      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
+      <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
-      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}">
+      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
         <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(LANG==='en'?e:(EFF_ZH[e]||''))}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
+  if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
   SEL[t].on=!SEL[t].on;ls.set('arenaSel',SEL);renderLanes()});
 $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(!s)return;const t=s.closest('.lane').dataset.t;
   if(s.classList.contains('eff')){SEL[t].effort=s.value;ls.set('arenaSel',SEL);renderLanes();return}
@@ -2555,6 +2690,14 @@ function paintWinner(r){const w=r.winner;
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
+/* ---------- 动态模型列表（agy models 在后台读取，读到后补进下拉框） ---------- */
+function modelsLater(n){
+  if(n>=6||!CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length))return;
+  setTimeout(async()=>{try{const c=await api('/api/config');let got=false;
+    for(const t of CFG.order)if(CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length&&(c.tools[t]?.models||[]).length){CFG.tools[t].models=c.tools[t].models;got=true}
+    if(got)renderLanes()}catch(e){}modelsLater(n+1)},10000);
+}
+
 /* ---------- 附件 ---------- */
 const fmtSize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
 const kindTag=a=>({Word:'DOC',Excel:'XLS',PowerPoint:'PPT',PDF:'PDF',RTF:'RTF',ODT:'ODT',CSV:'CSV',image:'IMG',text:'TXT'}[a.kind]||(a.ext||'').replace('.','').slice(0,4).toUpperCase()||'FILE');
@@ -2654,6 +2797,8 @@ function renderConflicts(r,j){  // 共识和分歧：每家的说法放在对应
 }
 
 async function send(prompt,tools,models,efforts,tag,cwd,atts,copyFrom){
+  tools=tools.filter(t=>t!=='openai'||openaiSelected());
+  if(!tools.length){toast(T('t.enableOpenai'));return false}
   try{const d=await post('/api/run',{prompt,tools,models,efforts,tag,cwd,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,chat:CHAT,attachments:(atts||[]).map(a=>a.id),copy_attachments_from:copyFrom||''});
     for(const x of ROUNDS.values())if(x.open)setOpen(x,false);
     const meta={id:d.id,prompt,tag:d.tag,created_at:Date.now()/1000,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',cwd,chat:d.chat?1:0,
@@ -2669,7 +2814,7 @@ async function follow(th){
   if(th.turns.some(r=>r.running))return toast(T('t.busy'));
   if(th.att.pending())return toast(T('att.pending'));
   const atts=th.att.items.filter(a=>a.state==='ok');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS});
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS,include_openai:openaiSelected()});
     const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',peers:d.peers||0,
       attachments:atts.map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))},th.turns.length);
     th.att.clear();
@@ -2680,7 +2825,7 @@ async function follow(th){
 }
 function submitComposer(){
   const p=$('#prompt').value.trim();if(!p)return $('#prompt').focus();
-  const tools=CFG.order.filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
+  const tools=visibleTools().filter(t=>SEL[t].on);if(!tools.length)return toast(T('t.pickTool'));
   if(COMPOSER_ATT.pending())return toast(T('att.pending'));
   const atts=COMPOSER_ATT.items.filter(a=>a.state==='ok');
   send(p,tools,Object.fromEntries(tools.map(t=>[t,SEL[t].model||''])),Object.fromEntries(tools.map(t=>[t,SEL[t].effort||''])),
@@ -2770,6 +2915,9 @@ async function loadEnv(){
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
+    if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
+      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
+      <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
     const hint=LANG==='en'?(t.hint_en||t.hint):t.hint;
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
@@ -2804,10 +2952,27 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   applyI18n();
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
-  for(const t of CFG.order)SEL[t]={on:saved[t]?.on??true,model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if(SEL.openai){
+    const setting=$('#showOpenai');
+    $('#openaiPreference').hidden=false;
+    $('#openaiKeyNote').hidden=CFG.tools.openai.ready!==false;
+    setting.checked=SHOW_OPENAI;
+    if(!SHOW_OPENAI)SEL.openai.on=false;
+    setting.onchange=()=>{
+      SHOW_OPENAI=setting.checked;
+      ls.set('arenaShowOpenai',SHOW_OPENAI);
+      SEL.openai.on=false;
+      ls.set('arenaSel',SEL);
+      const row=$('[data-openai-row]');
+      if(row)row.hidden=!SHOW_OPENAI;
+      renderLanes();
+    };
+  }
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
   CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
+  modelsLater(0);
   COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
