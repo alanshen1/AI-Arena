@@ -123,6 +123,8 @@ MSG = {
     "chat_note": ("[聊天模式] 已要求像通用助手那样完整作答\n", "[chat mode] Asked to answer like a general-purpose assistant\n"),
     "too_big": ("文件太大（上限 {mb} MB）", "File too large (limit {mb} MB)"),
     "attach_missing": ("附件不存在或已过期，请重新添加：{name}", "Attachment missing or expired; add it again: {name}"),
+    "peers_note": ("[其他回答] 已附上 {names} 上一轮的回答，方便对比\n",
+                   "[other answers] Included the previous answers from {names} for comparison\n"),
     "attach_note": ("[附件] {n} 个，提取文字约 {chars} 字\n", "[attachments] {n} file(s), about {chars} characters of text\n"),
     "judge_interrupted": ("评分被中断（后台服务重启过），可以重试", "Scoring was interrupted (the background service restarted). Try again."),
     "judge_timeout_tail": ("{label} 超过 {sec} 秒没有完成。最后的输出：{tail}", "{label} did not finish within {sec} seconds. Last output: {tail}"),
@@ -478,7 +480,8 @@ def open_login(tool, lang="zh"):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
   tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
-  thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0, attachments TEXT DEFAULT '');
+  thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0, attachments TEXT DEFAULT '',
+  peers INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds REAL, output TEXT,
   log TEXT, cmd TEXT, model TEXT DEFAULT '', actual_model TEXT DEFAULT '', effort TEXT DEFAULT '',
   session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
@@ -498,8 +501,9 @@ def migrate(c):  # 旧数据库补列
                        ("outputs", "session"), ("runs", "attachments")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
-    if "chat" not in [r[1] for r in c.execute("PRAGMA table_info(runs)")]:
-        c.execute("ALTER TABLE runs ADD COLUMN chat INTEGER DEFAULT 0")
+    for col in ("chat", "peers"):
+        if col not in [r[1] for r in c.execute("PRAGMA table_info(runs)")]:
+            c.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER DEFAULT 0")
     c.commit()
 
 
@@ -1022,6 +1026,28 @@ def cleanup_staging(max_age=86400):
                 pass
 
 
+PEER_CHARS, PEERS_TOTAL = 12000, 36000
+
+
+def peer_block(peers, lang="zh"):
+    """追问时，把上一轮其他模型的回答（标明模型）附给当前工具，便于跨模型比较。"""
+    if not peers:
+        return ""
+    en = lang == "en"
+    parts = ["For reference, here are the other models' answers to the previous question. Your own previous answer is "
+             "in our conversation history; together they are all the answers from that round.\n" if en
+             else "供参考：下面是其他模型对上一个问题的回答。你自己上一轮的回答在我们的对话记录里，加起来就是上一轮的全部回答。\n"]
+    left = PEERS_TOTAL
+    for name, text in peers:
+        cap = max(2000, min(PEER_CHARS, left))
+        text = text.strip()
+        if len(text) > cap:
+            text = text[:cap] + ("\n…(truncated)" if en else "\n……（后面省略）")
+        left -= len(text)
+        parts.append(f"[Answer from {name}]\n{text}\n" if en else f"【{name} 的回答】\n{text}\n")
+    return "\n".join(parts) + "\n"
+
+
 def build_transcript(history, prompt, lang="zh"):
     en = lang == "en"
     parts = ["Below is our conversation so far. Answer the new question at the end with it in mind.\n" if en
@@ -1050,6 +1076,7 @@ MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # 如 Codex 在 stderr
 
 
 def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False,
+              peers=None,
               attach="", attach_dir=""):
     base, extra, note = list(spec["cmd"]), [], ""
     if attach_dir and cwd and spec.get("add_dir_args"):  # 指定了工作目录时，另外允许读附件目录
@@ -1075,10 +1102,13 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     elif history:
         prompt = build_transcript(history, prompt, lang)
         note = M(lang, "resume_transcript", n=len(history))
-    if attach:  # 附件内容放在问题前面
-        prompt = attach + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
+    pblock = peer_block(peers, lang)
+    if attach or pblock:  # 附件内容、其他模型的回答放在问题前面
+        prompt = attach + pblock + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
+    if pblock:
+        note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
     if chat:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
-        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
+        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach or pblock else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     shown = " ".join(shlex.quote(a) for a in base)
@@ -1455,10 +1485,10 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
 
 
 def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh",
-              chat=False, attachments=None):
+              chat=False, attachments=None, share_peers=True):
     cfg = load_cfg()
     on = enabled_tools(cfg)
-    thread, parent_id, sessions, histories = "", "", {}, {}
+    thread, parent_id, sessions, histories, prev = "", "", {}, {}, []
     if parent:  # 追问：沿用上一轮的工具、模型、effort、目录，并找各工具的会话 ID
         p = q("SELECT * FROM runs WHERE id=?", (parent,), one=True)
         if not p:
@@ -1475,6 +1505,14 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
             histories[t] = [(x["prompt"], x["output"] or "") for x in rows]
             ok = [x["session"] for x in rows if x["session"] and x["status"] == "ok"]
             sessions[t] = ok[-1] if ok else ""
+        if share_peers:  # 被追问那一轮的全部成功回答，带模型名
+            outs = q("SELECT tool, output, status, model, actual_model FROM outputs WHERE run_id=?", (parent_id,))
+            for o in sorted(outs, key=lambda o: tools.index(o["tool"]) if o["tool"] in tools else 99):
+                if o["status"] == "ok" and (o["output"] or "").strip() and o["tool"] in cfg["tools"]:
+                    label = cfg["tools"][o["tool"]].get("label") or o["tool"].capitalize()
+                    m = o.get("actual_model") or o.get("model") or ""
+                    prev.append((o["tool"], f"{label}（{m}）" if m and lang != "en" else f"{label} ({m})" if m else label,
+                                 o["output"]))
     tools = [t for t in tools if t in on] or on
     for rid0 in [k for k, r in RUNS.items() if r.finished_at and time.time() - r.finished_at > 1800]:
         RUNS.pop(rid0, None)  # 完成 30 分钟后从内存移除，之后从数据库回放
@@ -1486,10 +1524,12 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     attach = attachment_block(metas, lang)
     attach_dir = str(ATTACH_DIR / rid) if metas else ""
     run_cwd = cwd or attach_dir or None  # 没指定工作目录时，在附件目录里运行，工具能直接读到附件
-    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
-                                            json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat)),
-                                            json.dumps(metas, ensure_ascii=False)))
+    peers = {t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
+    shared = any(peers.values())
+    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments, peers) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
+                                              json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat)),
+                                              json.dumps(metas, ensure_ascii=False), int(shared)))
     run = Run(rid, tools)
     run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
@@ -1497,9 +1537,9 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         threading.Thread(target=exec_tool, args=(run, t, cfg["tools"][t], prompt, run_cwd, cfg.get("timeout", 600),
                                                  models[t], efforts[t], sessions.get(t, ""),
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
-                                                 attach, attach_dir if cwd else ""),
+                                                 peers.get(t), attach, attach_dir if cwd else ""),
                          daemon=True).start()
-    return rid, tools, models, efforts
+    return rid, tools, models, efforts, shared
 
 
 def run_detail(rid, with_turns=True, lang="zh"):
@@ -1686,18 +1726,20 @@ class H(BaseHTTPRequestHandler):
                 att = att + copy_attachments(str(b["copy_attachments_from"]))
             if b.get("parent"):
                 try:
-                    rid, tools, models, efforts = start_run(prompt, [], None, "", parent=str(b["parent"]),
-                                                            judge=jflag, judge_model=jmodel, lang=self.lang, attachments=att)
+                    rid, tools, models, efforts, shared = start_run(
+                        prompt, [], None, "", parent=str(b["parent"]), judge=jflag, judge_model=jmodel, lang=self.lang,
+                        attachments=att, share_peers=b.get("share_peers", True) is not False)
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
-                return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"]})
+                return self._json({"id": rid, "tools": tools, "models": models, "efforts": efforts, "parent": b["parent"],
+                                   "peers": int(shared)})
             cwd = os.path.expanduser(b.get("cwd") or "").strip() or None
             if cwd and not os.path.isdir(cwd):
                 return self._json({"error": M(self.lang, "no_dir", d=cwd)}, 400)
             models = b.get("models") if isinstance(b.get("models"), dict) else {}
             efforts = b.get("efforts") if isinstance(b.get("efforts"), dict) else {}
             try:
-                rid, tools, models, efforts = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
+                rid, tools, models, efforts, _ = start_run(prompt, b.get("tools") or [], cwd, (b.get("tag") or "").strip(),
                                                         models, efforts, judge=jflag, judge_model=jmodel, lang=self.lang,
                                                         chat=chat, attachments=att)
             except ValueError as e:
@@ -1926,7 +1968,11 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow{display:flex;gap:10px;align-items:flex-end;margin-top:16px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:14px;background:var(--solid);transition:box-shadow .2s,border-color .2s}
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
-.fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.fhint{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:6px 4px 0;color:var(--muted);font-size:12px}
+.fhint .sp{flex:1}
+.fshare{display:inline-flex;align-items:center;gap:5px;color:var(--ink);cursor:pointer;font-size:12.5px}
+.fshare input{margin:0}
+.chip.peer{color:var(--muted)}
 .attbtn{width:36px;height:36px;border-radius:10px}
 .attbtn svg{width:18px;height:18px}
 .atts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
@@ -2156,6 +2202,7 @@ const I18N={zh:{
  'st.queued':'排队中','st.run':'生成中','st.ok':'完成','st.err':'出错 {0}',
  'tie':'平手','bestOf':'最佳 {0}','stop':'停止','rerun':'重跑','rerun.title':'把首个问题作为新对话再问一次',
  'fq.ph':'接着追问，各工具会沿用自己的上下文回答','fq':'追问','fgo':'追问','fhint':'沿用上一轮的工具、模型和 effort。',
+ 'peers.label':'附上其他模型的回答','peers.title':'把上一轮其他模型的回答（标明模型）一起发给每个工具，方便让它们对比、点评或综合。想让各工具独立作答时关掉。','peers.chip':'看过其他回答',
  'rounds':'{0} 轮','roundN':'第 {0} 轮','loading':'正在载入…','allFull':'全部展开全文','allFold':'全部收起',
  'more':'展开全文','less':'收起','stars':'{0} 星','note.ph':'写点备注','note.aria':'{0} 的备注','best':'最佳','log':'过程日志','logEmpty':'（暂无）',
  'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
@@ -2194,6 +2241,7 @@ const I18N={zh:{
  'st.queued':'Queued','st.run':'Generating','st.ok':'Done','st.err':'Error {0}',
  'tie':'Tie','bestOf':'Best: {0}','stop':'Stop','rerun':'Rerun','rerun.title':'Ask the first question again as a new conversation',
  'fq.ph':'Ask a follow-up. Each tool continues its own conversation','fq':'Follow-up','fgo':'Follow up','fhint':'Uses the same tools, models and effort as the last round.',
+ 'peers.label':'Include the other answers','peers.title':"Send each tool the other models' answers from the previous round, labeled by model, so it can compare, critique or combine them. Turn off to keep answers independent.",'peers.chip':'Saw other answers',
  'rounds':'{0} rounds','roundN':'Round {0}','loading':'Loading…','allFull':'Expand all','allFold':'Collapse all',
  'more':'Show full answer','less':'Show less','stars':'{0} stars','note.ph':'Add a note','note.aria':'Note for {0}','best':'Best','log':'Process log','logEmpty':'(empty)',
  'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
@@ -2296,7 +2344,7 @@ function makeRound(meta){
   <div class="rbody" hidden><div class="turns"></div>
     <div class="atts fatts"></div>
     <div class="follow"><textarea class="fq" rows="1" placeholder="${esc(T('fq.ph'))}" aria-label="${esc(T('fq'))}"></textarea><button class="ib attbtn fatt" type="button" title="${esc(T('att.title'))}" aria-label="${esc(T('att.btn'))}"></button><input type="file" class="fattin" multiple hidden><button class="btn primary fgo">${T('fgo')}</button></div>
-    <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
+    <p class="fhint"><label class="fshare" title="${esc(T('peers.title'))}"><input type="checkbox" class="fpeer"${PEERS?' checked':''}> ${T('peers.label')}</label><span class="sp"></span><span>${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</span></p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
   if(+meta.chat)$('.chatc',el).innerHTML=`<span class="chip chat">${T('chat.chip')}</span>`;
@@ -2313,6 +2361,7 @@ function makeRound(meta){
   fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
   fq.onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();follow(th)}};
   $('.fgo',el).onclick=()=>follow(th);
+  $('.fpeer',el).onchange=e=>{PEERS=e.target.checked;ls.set('arenaPeers',PEERS);$$('.fpeer').forEach(x=>x.checked=PEERS)};
   th.att=makeAttacher($('.fatts',el),$('.fattin',el),$('.follow',el),$('.fatt',el));
   return th;
 }
@@ -2329,7 +2378,7 @@ function makeTurn(th,meta,idx){
   const r={id:meta.id,meta,th,idx,tools:meta.tools||[],models:meta.models||{},efforts:meta.efforts||{},S:{},winner:meta.winner||'',es:null,allFull:false,running:false,folded:false};
   TURNS.set(r.id,r);th.turns.push(r);
   const el=r.el=document.createElement('section');el.className='turn';
-  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span><span class="tsum"></span></div>
+  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span>${+meta.peers?`<span class="chip peer" title="${esc(T('peers.title'))}">${T('peers.chip')}</span>`:''}<span class="tsum"></span></div>
     <div class="tbody">${(meta.attachments||[]).length?`<div class="tatts">${attLinks(r.id,meta.attachments)}</div>`:''}<div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
     <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
@@ -2469,7 +2518,7 @@ function attLinks(rid,list){return (list||[]).map(a=>`<a class="att" href="${fil
 let COMPOSER_ATT=null;
 
 /* ---------- 评分（匿名交给第三方模型） ---------- */
-let JSEL={model:'',auto:false},CHAT=true;
+let JSEL={model:'',auto:false},CHAT=true,PEERS=(()=>{try{return localStorage.getItem('arenaPeers')!=='false'}catch(e){return true}})();
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
   const v=CFG.tools[CFG.judge],opts=[{id:'',label:dlabel(CFG.judge)},...(v.models||[])];
@@ -2531,8 +2580,8 @@ async function follow(th){
   if(th.turns.some(r=>r.running))return toast(T('t.busy'));
   if(th.att.pending())return toast(T('att.pending'));
   const atts=th.att.items.filter(a=>a.state==='ok');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id)});
-    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS});
+    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',peers:d.peers||0,
       attachments:atts.map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))},th.turns.length);
     th.att.clear();
     r.autoJudge=!!(CFG.judge&&JSEL.auto);

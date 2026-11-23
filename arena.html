@@ -142,7 +142,11 @@ kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;b
 .follow{display:flex;gap:10px;align-items:flex-end;margin-top:16px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:14px;background:var(--solid);transition:box-shadow .2s,border-color .2s}
 .follow:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 10%,transparent)}
 .fq{flex:1;border:0;outline:0;resize:none;background:transparent;font-size:14.5px;line-height:1.6;padding:4px 0;max-height:30vh}
-.fhint{margin:6px 4px 0;color:var(--muted);font-size:12px}
+.fhint{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:6px 4px 0;color:var(--muted);font-size:12px}
+.fhint .sp{flex:1}
+.fshare{display:inline-flex;align-items:center;gap:5px;color:var(--ink);cursor:pointer;font-size:12.5px}
+.fshare input{margin:0}
+.chip.peer{color:var(--muted)}
 .attbtn{width:36px;height:36px;border-radius:10px}
 .attbtn svg{width:18px;height:18px}
 .atts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
@@ -372,6 +376,7 @@ const I18N={zh:{
  'st.queued':'排队中','st.run':'生成中','st.ok':'完成','st.err':'出错 {0}',
  'tie':'平手','bestOf':'最佳 {0}','stop':'停止','rerun':'重跑','rerun.title':'把首个问题作为新对话再问一次',
  'fq.ph':'接着追问，各工具会沿用自己的上下文回答','fq':'追问','fgo':'追问','fhint':'沿用上一轮的工具、模型和 effort。',
+ 'peers.label':'附上其他模型的回答','peers.title':'把上一轮其他模型的回答（标明模型）一起发给每个工具，方便让它们对比、点评或综合。想让各工具独立作答时关掉。','peers.chip':'看过其他回答',
  'rounds':'{0} 轮','roundN':'第 {0} 轮','loading':'正在载入…','allFull':'全部展开全文','allFold':'全部收起',
  'more':'展开全文','less':'收起','stars':'{0} 星','note.ph':'写点备注','note.aria':'{0} 的备注','best':'最佳','log':'过程日志','logEmpty':'（暂无）',
  'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
@@ -410,6 +415,7 @@ const I18N={zh:{
  'st.queued':'Queued','st.run':'Generating','st.ok':'Done','st.err':'Error {0}',
  'tie':'Tie','bestOf':'Best: {0}','stop':'Stop','rerun':'Rerun','rerun.title':'Ask the first question again as a new conversation',
  'fq.ph':'Ask a follow-up. Each tool continues its own conversation','fq':'Follow-up','fgo':'Follow up','fhint':'Uses the same tools, models and effort as the last round.',
+ 'peers.label':'Include the other answers','peers.title':"Send each tool the other models' answers from the previous round, labeled by model, so it can compare, critique or combine them. Turn off to keep answers independent.",'peers.chip':'Saw other answers',
  'rounds':'{0} rounds','roundN':'Round {0}','loading':'Loading…','allFull':'Expand all','allFold':'Collapse all',
  'more':'Show full answer','less':'Show less','stars':'{0} stars','note.ph':'Add a note','note.aria':'Note for {0}','best':'Best','log':'Process log','logEmpty':'(empty)',
  'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
@@ -512,7 +518,7 @@ function makeRound(meta){
   <div class="rbody" hidden><div class="turns"></div>
     <div class="atts fatts"></div>
     <div class="follow"><textarea class="fq" rows="1" placeholder="${esc(T('fq.ph'))}" aria-label="${esc(T('fq'))}"></textarea><button class="ib attbtn fatt" type="button" title="${esc(T('att.title'))}" aria-label="${esc(T('att.btn'))}"></button><input type="file" class="fattin" multiple hidden><button class="btn primary fgo">${T('fgo')}</button></div>
-    <p class="fhint">${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</p></div>`;
+    <p class="fhint"><label class="fshare" title="${esc(T('peers.title'))}"><input type="checkbox" class="fpeer"${PEERS?' checked':''}> ${T('peers.label')}</label><span class="sp"></span><span>${T('fhint')} <kbd>⌘</kbd> <kbd>Enter</kbd> ${T('toSend')}</span></p></div>`;
   $('.rq',el).textContent=meta.prompt;$('time',el).textContent=fmtTime(meta.created_at);
   if(meta.tag)$('.tagc',el).innerHTML=`<span class="chip">${esc(meta.tag)}</span>`;
   if(+meta.chat)$('.chatc',el).innerHTML=`<span class="chip chat">${T('chat.chip')}</span>`;
@@ -529,6 +535,7 @@ function makeRound(meta){
   fq.oninput=()=>{fq.style.height='auto';fq.style.height=Math.min(fq.scrollHeight,innerHeight*.3)+'px'};
   fq.onkeydown=e=>{if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();follow(th)}};
   $('.fgo',el).onclick=()=>follow(th);
+  $('.fpeer',el).onchange=e=>{PEERS=e.target.checked;ls.set('arenaPeers',PEERS);$$('.fpeer').forEach(x=>x.checked=PEERS)};
   th.att=makeAttacher($('.fatts',el),$('.fattin',el),$('.follow',el),$('.fatt',el));
   return th;
 }
@@ -545,7 +552,7 @@ function makeTurn(th,meta,idx){
   const r={id:meta.id,meta,th,idx,tools:meta.tools||[],models:meta.models||{},efforts:meta.efforts||{},S:{},winner:meta.winner||'',es:null,allFull:false,running:false,folded:false};
   TURNS.set(r.id,r);th.turns.push(r);
   const el=r.el=document.createElement('section');el.className='turn';
-  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span><span class="tsum"></span></div>
+  el.innerHTML=`<div class="th2" tabindex="0" role="button" aria-expanded="true"><span class="chev sm">${svg(I.chev)}</span><span class="tn">${T('roundN',idx+1)}</span><span class="tq"></span>${+meta.peers?`<span class="chip peer" title="${esc(T('peers.title'))}">${T('peers.chip')}</span>`:''}<span class="tsum"></span></div>
     <div class="tbody">${(meta.attachments||[]).length?`<div class="tatts">${attLinks(r.id,meta.attachments)}</div>`:''}<div class="cols" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))"></div>
     <div class="rfoot"><button class="btn sm ghost allfull">${T('allFull')}</button>${CFG.judge?`<button class="btn sm ghost jbtn">${esc(T('j.ask',tname(CFG.judge)))}</button><span class="jres"></span>`:''}<span class="sp"></span><button class="btn sm ghost tie">${T('tie')}</button></div></div>`;
   $('.tq',el).textContent=meta.prompt;
@@ -685,7 +692,7 @@ function attLinks(rid,list){return (list||[]).map(a=>`<a class="att" href="${fil
 let COMPOSER_ATT=null;
 
 /* ---------- 评分（匿名交给第三方模型） ---------- */
-let JSEL={model:'',auto:false},CHAT=true;
+let JSEL={model:'',auto:false},CHAT=true,PEERS=(()=>{try{return localStorage.getItem('arenaPeers')!=='false'}catch(e){return true}})();
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
   const v=CFG.tools[CFG.judge],opts=[{id:'',label:dlabel(CFG.judge)},...(v.models||[])];
@@ -747,8 +754,8 @@ async function follow(th){
   if(th.turns.some(r=>r.running))return toast(T('t.busy'));
   if(th.att.pending())return toast(T('att.pending'));
   const atts=th.att.items.filter(a=>a.state==='ok');
-  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id)});
-    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',
+  try{const d=await post('/api/run',{prompt:p,parent:last.id,judge:!!(CFG.judge&&JSEL.auto),judge_model:JSEL.model,attachments:atts.map(a=>a.id),share_peers:PEERS});
+    const r=makeTurn(th,{id:d.id,prompt:p,tools:d.tools,models:d.models||{},efforts:d.efforts||{},winner:'',peers:d.peers||0,
       attachments:atts.map(({id,name,size,kind,ext,chars})=>({id,name,size,kind,ext,chars}))},th.turns.length);
     th.att.clear();
     r.autoJudge=!!(CFG.judge&&JSEL.auto);
