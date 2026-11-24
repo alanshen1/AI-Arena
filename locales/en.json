@@ -237,7 +237,9 @@
   "go.copy": "Copy resume command",
   "go.copied": "Resume command copied",
   "go.note": "What you do there does not come back to Arena.",
-  "go.urlHint": "If the session did not open, use Continue in Terminal instead."
+  "go.urlHint": "If the session did not open, use Continue in Terminal instead.",
+  "e.desktopSync": "Add new conversations to Claude Desktop",
+  "e.desktopSyncNote": "After the first round of each new conversation, Claude's session is added to the \"{0}\" group in the Claude Desktop sidebar, once per session. Claude Desktop opens the session when it is added. Needs Claude Code v2.1.285 or later and a Claude subscription sign-in."
  },
  "msg": {
   "detect_timeout": "(check timed out)",
@@ -297,7 +299,9 @@
   "continue_url": "Opened this session in {app}.",
   "continue_fail": "Could not open it in {app}: {out}",
   "continue_old": "Opening directly in {app} needs Claude Code v2.1.285 or later. Run claude update in Terminal and try again.\n{out}",
-  "continue_none": "{label} has no way configured to continue elsewhere."
+  "continue_none": "{label} has no way configured to continue elsewhere.",
+  "desktop_synced": "[{app}] Added to the {app} sidebar\n",
+  "desktop_sync_fail": "[{app}] Could not add it: {msg}\n"
  },
  "tools": {
   "claude": {

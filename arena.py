@@ -32,7 +32,7 @@ SRV = None
 
 DEFAULT_CFG = {
     "version": 4,
-    "workspace": "~/AI-Arena",  # folder the tools run in when no working folder is set; all Arena sessions are kept here
+    "workspace": "~/AI Arena",  # folder the tools run in when no working folder is set; all Arena sessions are kept here
     "judge_timeout": 300,
     "timeout": 600,
     "tools": {
@@ -573,9 +573,10 @@ def open_login(tool, lang="en"):
 
 # ---------------- Workspace and continuing a session in the tool's own app ----------------
 def workspace_dir(cfg=None):
-    """Folder the tools run in when no working folder is set (config "workspace", default ~/AI-Arena)."""
+    """Folder the tools run in when no working folder is set (config "workspace", default ~/AI Arena).
+    Its name is also the group name the sessions get in the Claude Desktop sidebar."""
     cfg = cfg or load_cfg()
-    d = Path(os.environ.get("ARENA_WORKSPACE") or cfg.get("workspace") or "~/AI-Arena").expanduser()
+    d = Path(os.environ.get("ARENA_WORKSPACE") or cfg.get("workspace") or DEFAULT_CFG["workspace"]).expanduser()
     d.mkdir(parents=True, exist_ok=True)
     return str(d)
 
@@ -603,6 +604,40 @@ def session_for(rid, tool):
                 ORDER BY r.created_at""", (tool, thread, thread, run["created_at"]))
     root = q("SELECT * FROM runs WHERE id=?", (thread,), one=True) or run
     return (rows[-1]["session"] if rows else ""), legacy_workdir(run if run.get("workdir") else root)
+
+
+def get_setting(key, default=None):
+    r = q("SELECT v FROM settings WHERE k=?", (key,), one=True)
+    return json.loads(r["v"]) if r else default
+
+
+def set_setting(key, value):
+    q("INSERT OR REPLACE INTO settings(k, v) VALUES(?, ?)", (key, json.dumps(value)))
+
+
+SYNC_LOCK = threading.Lock()
+
+
+def desktop_sync(rid, lang="en"):
+    """Setting "Add new conversations to Claude Desktop": move each new session of a tool that can open in its
+    desktop app (claude --desktop --resume) once, so it shows in that app's sidebar under the workspace folder."""
+    if not get_setting("desktop_sync", False):
+        return
+    tools = load_cfg()["tools"]
+    for o in q("SELECT tool, status, session FROM outputs WHERE run_id=?", (rid,)):
+        spec = tools.get(o["tool"]) or {}
+        if o["status"] != "ok" or not o["session"] or not spec.get("continue_desktop"):
+            continue
+        with SYNC_LOCK:  # each session only once
+            done = set(get_setting("desktop_synced", []))
+            if o["session"] in done:
+                continue
+            ok, message, _ = continue_session(rid, o["tool"], "app", lang)
+            if ok:
+                set_setting("desktop_synced", (list(done) + [o["session"]])[-5000:])
+        note = M(lang, "desktop_synced" if ok else "desktop_sync_fail", app=spec.get("continue_app") or o["tool"], msg=message)
+        q("UPDATE outputs SET log=COALESCE(log,'')||? WHERE run_id=? AND tool=?", (note, rid, o["tool"]))
+        print(note.strip(), flush=True)
 
 
 def continue_session(rid, tool, action, lang="en"):
@@ -1490,6 +1525,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             run.events.append({"type": "end"})
             if run.judge and not run.cancelled:  # automatic scoring
                 threading.Thread(target=start_judge, args=(run.id, run.judge_model, run.lang), daemon=True).start()
+            if not run.cancelled:  # add new Claude sessions to Claude Desktop, if turned on
+                threading.Thread(target=desktop_sync, args=(run.id, run.lang), daemon=True).start()
         run.cond.notify_all()
 
 
@@ -1913,7 +1950,10 @@ class H(BaseHTTPRequestHandler):
                                       "default_on": v.get("default_on", True),
                                       "ready": v.get("transport") != "openai_responses" or openai_ready()}
                                   for k, v in cfg["tools"].items()},
-                        "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
+                        "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags,
+                        "desktop_sync": {"available": any(v.get("continue_desktop") for v in cfg["tools"].values()),
+                                         "on": bool(get_setting("desktop_sync", False)),
+                                         "folder": Path(workspace_dir(cfg)).name}})
         elif p.startswith("/api/file/"):  # open an attachment's original file for a round
             parts = p.split("/")
             if len(parts) != 6:
@@ -1989,6 +2029,10 @@ class H(BaseHTTPRequestHandler):
             b = self._body()
         except ValueError:
             return self._json({"error": "bad json"}, 400)
+        if p == "/api/settings":
+            if "desktop_sync" in b:
+                set_setting("desktop_sync", bool(b["desktop_sync"]))
+            return self._json({"desktop_sync": bool(get_setting("desktop_sync", False))})
         if p == "/api/continue":
             ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
                                                     str(b.get("action") or "app"), self.lang)
@@ -2533,6 +2577,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">Check again</button><span id="envNode" class="note-s" style="margin:0"></span></div>
   <div class="bar" id="openaiPreference" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
+  </div>
+  <div class="bar" id="desktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
+    <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
   </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
@@ -3203,6 +3251,11 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if(CFG.desktop_sync?.available){  // Setup page: add new Claude sessions to the Claude Desktop sidebar
+    const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
+    $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);
+    sw.onchange=()=>post('/api/settings',{desktop_sync:sw.checked}).then(d=>{CFG.desktop_sync.on=d.desktop_sync}).catch(e=>{sw.checked=!sw.checked;toast(e)});
+  }
   if(SEL.openai){
     const setting=$('#showOpenai');
     $('#openaiPreference').hidden=false;

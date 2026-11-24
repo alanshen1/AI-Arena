@@ -66,7 +66,7 @@ Pull the latest code (or replace `arena.py`, `arena.html`, `arena_openai.py` and
 
 - Each file contributes up to 60,000 characters and each question up to 100,000; longer text is cut and the tools are told where to find the rest.
 - Files are copied into `attachments/<round>/` next to `arena.py` and deleted with the conversation.
-- The tools run in the workspace folder (`~/AI-Arena` by default) or in the working folder you set, and Claude and Antigravity get `--add-dir` for the attachments folder; Codex can read the path in its default sandbox.
+- The tools run in the workspace folder (`~/AI Arena` by default) or in the working folder you set, and Claude and Antigravity get `--add-dir` for the attachments folder; Codex can read the path in its default sandbox.
 - A scanned PDF has no text layer. The tools can still open it, but only models that read images will see the content.
 
 ## Continuing a session
@@ -79,8 +79,9 @@ Claude Code, Codex and Antigravity keep their own history of every Arena round, 
 | Codex | Opens `codex://threads/<id>` in the Codex App. If the app does not show the session, use Terminal. | `codex resume <id>` |
 | Antigravity | The desktop app cannot open CLI conversations. | `agy --conversation <id>` |
 
+- **Add new conversations to Claude Desktop** (Setup page, off by default): after the first round of each new conversation, Arena runs `claude --desktop --resume` once for Claude's session, so it appears in the Claude Desktop sidebar under the workspace folder's group (**AI Arena** by default). Each session is added once; follow-ups keep using the same session. Claude Desktop opens the session when it is added. The result is written to Claude's process log.
 - **Copy resume command** copies the command, including `cd` into the right folder, for use anywhere.
-- Every thread runs in one folder: the working folder you set, or the workspace folder `~/AI-Arena` (change it with `workspace` in `arena_config.json`). Follow-ups always use the folder the thread started in, so each tool can find its session. In Claude Desktop you can also type `/resume` to pick any Arena session from the CLI list.
+- Every thread runs in one folder: the working folder you set, or the workspace folder `~/AI Arena` (change it with `workspace` in `arena_config.json`). Follow-ups always use the folder the thread started in, so each tool can find its session. In Claude Desktop you can also type `/resume` to pick any Arena session from the CLI list.
 - What you do outside Arena does not come back to Arena's history. Don't continue a session in another app while Arena is still running a follow-up on it.
 
 ## Prompt library
@@ -137,7 +138,7 @@ Created on first run and excluded by `.gitignore`:
 - `arena.log`: launcher log.
 - `attachments/`: files you attached, one folder per round.
 - `models_cache.json`: the last model list read from `agy models`.
-- `~/AI-Arena/`: the workspace folder the tools run in (outside the repository).
+- `~/AI Arena/`: the workspace folder the tools run in (outside the repository).
 
 ## Configuration
 
@@ -159,7 +160,7 @@ Created on first run and excluded by `.gitignore`:
 | `model_flag` / `models` | Option used to pass the model, and the models offered in the picker |
 | `effort_args` / `efforts` | Arguments used to pass effort (`{effort}` is replaced), and the levels offered |
 | `resume_args` / `resume_pos` | Arguments used to continue a session for follow-ups (`{session}` is replaced) |
-| `workspace` (top level) | Folder the tools run in when no working folder is set; default `~/AI-Arena` |
+| `workspace` (top level) | Folder the tools run in when no working folder is set; default `~/AI Arena` |
 | `continue_app`, `continue_desktop`, `continue_url`, `continue_terminal` | How the arrow button continues a session: the app's name, CLI arguments that open the desktop app, a deep link, and CLI arguments for Terminal. `{session}` is replaced with the session ID |
 | `models_cmd` | Command that lists available models at runtime, e.g. `agy models` (runs in a pseudo-terminal when `pty` is set; the result is logged to `arena.log`) |
 | `strip_env` | Environment variables removed before the tool starts. Claude removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so it always uses your claude.ai sign-in |

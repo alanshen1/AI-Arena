@@ -411,6 +411,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="bar" id="openaiPreference" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
   </div>
+  <div class="bar" id="desktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
+    <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -1080,6 +1084,11 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if(CFG.desktop_sync?.available){  // Setup page: add new Claude sessions to the Claude Desktop sidebar
+    const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
+    $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);
+    sw.onchange=()=>post('/api/settings',{desktop_sync:sw.checked}).then(d=>{CFG.desktop_sync.on=d.desktop_sync}).catch(e=>{sw.checked=!sw.checked;toast(e)});
+  }
   if(SEL.openai){
     const setting=$('#showOpenai');
     $('#openaiPreference').hidden=false;
