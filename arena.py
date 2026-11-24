@@ -2570,6 +2570,8 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 </div>
 <div id="toast" hidden role="status"></div>
 
+<script type="application/json" id="i18n-data">__I18N__</script>
+<script type="application/json" id="langs-data">__LANGS__</script>
 <script>
 const TOKEN="__TOKEN__";
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
@@ -2588,7 +2590,20 @@ const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6
   go:'<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- Language ---------- */
-const I18N=__I18N__, LANGS=__LANGS__;  // filled in by arena.py from locales/*.json
+// Interface text of every language, filled in by arena.py from locales/*.json when it serves the page.
+let I18N={},LANGS=[];
+try{I18N=JSON.parse($('#i18n-data').textContent);LANGS=JSON.parse($('#langs-data').textContent)}catch(e){}
+if(!LANGS.length){  // an older background service is still running and did not fill in the text: offer a working Quit
+  document.body.innerHTML=`<div style="max-width:620px;margin:80px auto;padding:28px 32px;border-radius:16px;background:#fff;
+    box-shadow:0 18px 40px -24px rgba(30,50,110,.45);font:15px/1.7 system-ui,sans-serif;color:#1f2937">
+    <h2 style="margin:0 0 8px;font-size:18px">AI Arena was updated</h2>
+    <p style="margin:0 0 18px">The background service still running is an older version. Quit it, then open AI Arena again.</p>
+    <button id="staleQuit" style="padding:8px 18px;border:0;border-radius:10px;background:#1E3A8A;color:#fff;font:inherit;cursor:pointer">Quit the old service</button>
+    <p id="staleDone" hidden style="margin:16px 0 0;color:#047857">Stopped. Double-click AI Arena to open the new version.</p></div>`;
+  document.getElementById('staleQuit').onclick=()=>fetch('/api/shutdown',{method:'POST',headers:{'Content-Type':'application/json','X-Arena-Token':TOKEN},body:'{}'})
+    .catch(()=>{}).finally(()=>{document.getElementById('staleQuit').disabled=true;document.getElementById('staleDone').hidden=false});
+  throw new Error('AI Arena: outdated background service');
+}
 const LANG_CODES=LANGS.map(l=>l.code);
 let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(LANG_CODES.includes(v))return v}catch(e){}
   for(const n of navigator.languages||[navigator.language||'']){const c=LANG_CODES.find(c=>n.toLowerCase()===c||n.toLowerCase().startsWith(c+'-'));if(c)return c}
