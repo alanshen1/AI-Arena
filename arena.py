@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""AI Arena — 本地对比台：同一问题并行发给 Claude / Codex / Gemini，三列流式对比，带历史与打分。
+"""AI Arena — a local comparison desk: send one question to Claude / Codex / Antigravity in parallel,
+stream the answers side by side, and keep history and scores.
 
-启动:  双击 AI Arena.app（推荐），或 python3 arena.py   # 打开 http://127.0.0.1:8765
-       python3 arena.py --no-open --idle-exit           # 不开浏览器；15 分钟无人使用自动退出
-环境变量: ARENA_PORT（端口）、ARENA_CONFIG（配置路径）、ARENA_DB（数据库路径）
+Start:  double-click AI Arena.app (recommended), or python3 arena.py   # opens http://127.0.0.1:8765
+        python3 arena.py --no-open --idle-exit                      # no browser; quits after 15 idle minutes
+Environment variables: ARENA_PORT (port), ARENA_CONFIG (config path), ARENA_DB (database path)
 
-首次运行会在脚本旁生成 arena_config.json，可修改各工具的命令、解析方式、颜色，
-也可以加入新工具（如 ollama、aider），无需改代码。数据存于 arena.db（SQLite）。
-界面在同目录的 arena.html（缺失时用脚本内置版本）。
-仅依赖 Python 3.8+ 标准库。
+The first run creates arena_config.json next to this script. Edit it to change each tool's command,
+parser and color, or to add new tools (such as ollama or aider) without touching the code.
+Data is stored in arena.db (SQLite). The interface is arena.html in the same folder
+(the built-in copy is used when it is missing).
+Needs only the Python 3.8+ standard library.
 """
 import codecs, copy, glob, json, os, platform, random, re, zipfile, xml.etree.ElementTree as ET, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,10 +22,10 @@ import urllib.parse
 HERE = Path(__file__).resolve().parent
 CFG_PATH = Path(os.environ.get("ARENA_CONFIG", HERE / "arena_config.json"))
 DB_PATH = Path(os.environ.get("ARENA_DB", HERE / "arena.db"))
-ATTACH_DIR = Path(os.environ.get("ARENA_ATTACH", HERE / "attachments"))  # 附件原文件与提取出的文字
+ATTACH_DIR = Path(os.environ.get("ARENA_ATTACH", HERE / "attachments"))  # original attachment files and their extracted text
 PORT = int(os.environ.get("ARENA_PORT", 8765))
-TOKEN = secrets.token_urlsafe(24)  # 每次启动重新生成，防止其他网页调用本地接口
-IDLE_EXIT = "--idle-exit" in sys.argv  # 由 macOS App 启动时开启：网页关闭一段时间后自动退出
+TOKEN = secrets.token_urlsafe(24)  # regenerated on every start so other web pages cannot call the local API
+IDLE_EXIT = "--idle-exit" in sys.argv  # set when started from the macOS app: quit some time after the page is closed
 IDLE_SECS = int(os.environ.get("ARENA_IDLE_SECS", 900))
 LAST_SEEN = time.time()
 SRV = None
@@ -47,7 +49,7 @@ DEFAULT_CFG = {
                        {"id": "haiku", "label": "Haiku"}, {"id": "fable", "label": "Fable"}]},
         "codex": {"cmd": ["codex", "exec", "--json", "--skip-git-repo-check", "{prompt}"],
                   "parser": "codex_json", "color": "#10a37f",
-                  "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [选项] resume <ID> <问题>
+                  "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [options] resume <ID> <question>
                   "package": "@openai/codex",
                   "login": "codex login", "hint": "浏览器会打开，用 ChatGPT 账号登录", "hint_en": "A browser opens; sign in with your ChatGPT account",
                   "model_flag": "-m", "default_label": "默认（推荐模型）", "default_label_en": "Default (recommended)",
@@ -67,19 +69,19 @@ DEFAULT_CFG = {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
             "parser": "agy_stream", "color": "#7b61ff",
             "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
-            "pty": True,  # agy -p 在非终端环境下可能卡住，用伪终端运行
+            "pty": True,  # agy -p can hang without a terminal, so it runs in a pseudo-terminal
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
             "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit", "hint_en": "Sign in with your Google account, then type /quit",
             "model_flag": "--model", "default_label": "默认（自动选择）", "default_label_en": "Default (auto)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models_cmd": ["agy", "models"], "models": []},
-        "grok": {"role": "judge",  # 评分模型，不参赛
+        "grok": {"role": "judge",  # the scoring model; it does not compete
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
                  "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
                  "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号", "hint_en": "A browser opens; sign in with your xAI / X account",
                  "model_flag": "-m", "default_label": "默认", "default_label_en": "Default",
                  "models": [{"id": "grok-4.7", "label": "Grok 4.7"}, {"id": "grok-4.5", "label": "Grok 4.5"}]},
-        "gemini": {"enabled": False,  # 个人账户自 2026-06-18 起停止服务；有付费 Gemini API key 可改为 true
+        "gemini": {"enabled": False,  # personal accounts stopped working on 2026-06-18; set to true if you have a paid Gemini API key
                    "cmd": ["gemini", "-p", "{prompt}"], "parser": "raw", "color": "#4285f4",
                    "package": "@google/gemini-cli",
                    "login": "gemini", "hint": "选 Login with Google 完成登录，然后输入 /quit", "hint_en": "Choose Login with Google, then type /quit",
@@ -93,7 +95,7 @@ DEFAULT_CFG = {
 }
 
 
-# ---------------- 界面语言（前端用 X-Arena-Lang 头传入 zh / en） ----------------
+# ---------------- Interface language (the front end sends zh / en in the X-Arena-Lang header) ----------------
 MSG = {
     "detect_timeout": ("（检测超时）", "(check timed out)"),
     "node_use": ("使用已安装的 Node {ver}（{d}）\n", "Using installed Node {ver} ({d})\n"),
@@ -156,7 +158,7 @@ def load_cfg():
         CFG_PATH.write_text(json.dumps(DEFAULT_CFG, ensure_ascii=False, indent=2), encoding="utf-8")
     cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
     tools = cfg.setdefault("tools", {})
-    if "antigravity" not in tools:  # 一次性迁移：Gemini CLI 个人版停服 → Antigravity CLI
+    if "antigravity" not in tools:  # one-time migration: Gemini CLI personal tier ended -> Antigravity CLI
         migrated = {}
         for name, spec in tools.items():
             if name == "gemini":
@@ -166,7 +168,7 @@ def load_cfg():
         migrated.setdefault("antigravity", copy.deepcopy(DEFAULT_CFG["tools"]["antigravity"]))
         cfg["tools"] = tools = migrated
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    if cfg.get("version", 1) < 2:  # v2：Codex / Antigravity 改用 JSON 输出，才能拿到会话 ID 以便追问
+    if cfg.get("version", 1) < 2:  # v2: Codex / Antigravity switch to JSON output so the session ID is available for follow-ups
         old = {"codex": ["codex", "exec", "--skip-git-repo-check", "{prompt}"], "antigravity": ["agy", "-p", "{prompt}"]}
         for name, old_cmd in old.items():
             sp = tools.get(name)
@@ -175,12 +177,12 @@ def load_cfg():
                 sp["parser"] = DEFAULT_CFG["tools"][name]["parser"]
         cfg["version"] = 2
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    if cfg.get("version", 1) < 3:  # v3：加入评分模型 Grok
+    if cfg.get("version", 1) < 3:  # v3: add Grok as the scoring model
         tools.setdefault("grok", copy.deepcopy(DEFAULT_CFG["tools"]["grok"]))
         cfg.setdefault("judge_timeout", DEFAULT_CFG["judge_timeout"])
         cfg["version"] = 3
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    if cfg.get("version", 1) < 4:  # v4：Codex 命令里写死的 effort 会盖过「默认」，且纯文本输出拿不到会话 ID
+    if cfg.get("version", 1) < 4:  # v4: an effort hard-coded in the Codex command overrides "Default", and plain-text output has no session ID
         sp = tools.get("codex")
         if sp and sp.get("parser") == "raw" and sp.get("cmd", [])[:2] == ["codex", "exec"]:
             cmd, rest, i = sp["cmd"], [], 0
@@ -199,13 +201,13 @@ def load_cfg():
         cfg["version"] = 4
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     tools.setdefault("openai", copy.deepcopy(DEFAULT_CFG["tools"]["openai"]))
-    for name, spec in tools.items():  # 旧配置补上新字段
+    for name, spec in tools.items():  # fill in new fields for older configs
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
             spec.setdefault(k, copy.deepcopy(v))
     return cfg
 
 
-def enabled_tools(cfg):  # 参赛工具（不含评分模型）
+def enabled_tools(cfg):  # competing tools (excluding the scoring model)
     return [n for n, sp in cfg["tools"].items() if sp.get("enabled", True) and sp.get("role") != "judge"]
 
 
@@ -221,7 +223,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\
 
 
 class PtyText:
-    """把伪终端输出还原成纯文本：去 ANSI、处理 \r 覆盖（进度动画），按行输出。"""
+    """Turn pseudo-terminal output into plain text: strip ANSI codes, apply \r overwrites (progress animations), emit line by line."""
 
     def __init__(self):
         self.line = ""
@@ -247,8 +249,8 @@ class PtyText:
         return rest
 
 
-MODEL_CACHE = {}  # 由 models_cmd（如 agy models）动态读取的模型列表
-MODELS_FILE = Path(os.environ.get("ARENA_MODELS", HERE / "models_cache.json"))  # 上次读到的列表，启动时先用它
+MODEL_CACHE = {}  # model lists read at runtime from models_cmd (e.g. agy models)
+MODELS_FILE = Path(os.environ.get("ARENA_MODELS", HERE / "models_cache.json"))  # the last list read; used first at startup
 SLUG_RE = re.compile(r"\b([a-z][a-z0-9]*(?:[.-][a-z0-9]+)+)\b")
 NAME_RE = re.compile(r"^((?:Gemini|Claude|GPT|Orchestrator)\b[\w .()\-]*?)\s*$", re.I)
 EFFORT_SUFFIX = re.compile(r"-(?:minimal|low|medium|high|xhigh|max)$")
@@ -261,10 +263,10 @@ except (OSError, ValueError):
 
 
 def parse_models(text):
-    """解析 `agy models` 这类输出：优先取模型 ID（gemini-4-neon），没有 ID 时用显示名称。"""
+    """Parse output such as `agy models`: prefer model IDs (gemini-4-neon) and fall back to display names."""
     text = ANSI_RE.sub("", text or "").replace("\r", "")
     t = text.strip()
-    if t[:1] in "[{":  # JSON 输出
+    if t[:1] in "[{":  # JSON output
         try:
             data = json.loads(t)
             items = data if isinstance(data, list) else data.get("models") or []
@@ -289,16 +291,16 @@ def parse_models(text):
             rest = (ln[:m.start()] + ln[m.end():]).strip(" \t-*•:|│")
             if rest.startswith("(") and rest.endswith(")"):
                 rest = rest[1:-1].strip()
-            rest = re.sub(r"\s{2,}.*$", "", rest)  # 表格里后面的列（如额度说明）去掉
+            rest = re.sub(r"\s{2,}.*$", "", rest)  # drop trailing table columns (such as quota notes)
             if rest.lower().strip("()[] ") in ("default", "current", "selected", "active", "默认", "当前"):
                 rest = ""
             models.append({"id": m.group(1), "label": rest or m.group(1)})
             continue
         n = NAME_RE.match(re.split(r"\s{2,}|\t", ln)[0])
-        if n:  # 只有显示名称，如 "Gemini 4 Neon"、"Orchestrator (Neon)"
+        if n:  # display name only, e.g. "Gemini 4 Neon", "Orchestrator (Neon)"
             models.append({"id": n.group(1).strip(), "label": n.group(1).strip()})
     ids = {x["id"] for x in models}
-    # 同一个模型按思考档位列了多个 ID（gemini-4-neon-high…）而基础 ID 也在时，只留基础 ID，档位用 Effort 选
+    # when a model is listed once per thinking level (gemini-4-neon-high…) and the base ID is also listed, keep only the base ID; pick the level with Effort
     models = [x for x in models if not (EFFORT_SUFFIX.search(x["id"]) and EFFORT_SUFFIX.sub("", x["id"]) in ids)]
     return list({x["id"]: x for x in models}.values())
 
@@ -315,7 +317,7 @@ def refresh_models():
             exe = mc and which(mc[0])
             if not exe:
                 continue
-            try:  # agy 在非终端环境下可能卡住，和问答一样按 pty 设置运行
+            try:  # agy can hang without a terminal; use the pty setting, as for questions
                 rc, out, err = run_streaming(exe, mc[1:], spec, tempfile.mkdtemp(prefix="arena-models-"), 40, lambda t: None)
             except Exception as e:
                 print(f"[models] {name}: {e}", flush=True)
@@ -325,7 +327,7 @@ def refresh_models():
                 print(f"[models] {name}: {len(models)} models: " + ", ".join(x["id"] for x in models), flush=True)
                 if MODEL_CACHE.get(name) != models:
                     MODEL_CACHE[name], changed = models, True
-            else:  # 没解析出来：把原始输出写进 arena.log，方便排查格式
+            else:  # nothing parsed: write the raw output to arena.log to help diagnose the format
                 raw = ANSI_RE.sub("", out + ("\n[stderr] " + err if (err or "").strip() else "")).strip()
                 print(f"[models] {name}: exit={'timeout' if rc is None else rc}, nothing parsed. Raw output:\n"
                       f"{raw[:3000] or '(empty)'}", flush=True)
@@ -338,15 +340,15 @@ def refresh_models():
         MODELS_LOCK.release()
 
 
-# ---------------- 命令查找（Finder 启动时 PATH 很短，需要主动搜常见安装位置） ----------------
+# ---------------- Finding commands (PATH is short when started from Finder, so search common install locations) ----------------
 def _ver_key(p):
     return [int(x) for x in re.findall(r"\d+", p)[:3]]
 
 
-ARENA_HOME = Path.home() / ".ai-arena"     # 一键安装的位置，无需管理员权限
-NODE_DIR = ARENA_HOME / "node"             # 独立 Node（系统 Node < 20 或没有时自动下载）
-NPM_PREFIX = ARENA_HOME / "npm-global"     # CLI 安装目录
-NODE_PIN = ARENA_HOME / "node-dir"        # 记录选中的 Node 20+ 所在目录，运行 CLI 时放在 PATH 最前
+ARENA_HOME = Path.home() / ".ai-arena"     # one-click install location; no admin rights needed
+NODE_DIR = ARENA_HOME / "node"             # standalone Node (downloaded when the system Node is < 20 or missing)
+NPM_PREFIX = ARENA_HOME / "npm-global"     # CLI install folder
+NODE_PIN = ARENA_HOME / "node-dir"        # folder of the chosen Node 20+; put first in PATH when running CLIs
 NODE_LOCK = threading.Lock()
 
 
@@ -363,10 +365,10 @@ def search_path():
              f"{home}/.asdf/shims", f"{home}/.local/share/mise/shims", f"{home}/.claude/local"]
     for pat in (f"{home}/.nvm/versions/node/*/bin", f"{home}/.fnm/node-versions/*/installation/bin",
                 f"{home}/Library/Application Support/fnm/node-versions/*/installation/bin"):
-        dirs += sorted(glob.glob(pat), key=_ver_key, reverse=True)  # 新版本优先
+        dirs += sorted(glob.glob(pat), key=_ver_key, reverse=True)  # newer versions first
     joined = os.pathsep.join(dict.fromkeys(d for d in dirs if d))
     npm = shutil.which("npm", path=joined)
-    if npm:  # npm 全局安装目录
+    if npm:  # npm global install folder
         try:
             r = subprocess.run([npm, "prefix", "-g"], capture_output=True, text=True, timeout=15,
                                env={**os.environ, "PATH": joined}, stdin=subprocess.DEVNULL)
@@ -382,7 +384,7 @@ PATH_CACHE = search_path()
 
 def child_env():
     env = os.environ.copy()
-    env.pop("CLAUDECODE", None)  # 允许在 Claude Code 终端里启动
+    env.pop("CLAUDECODE", None)  # allow starting from inside a Claude Code terminal
     env.pop("ARENA_OPENAI_API_KEY", None)
     env.update(NO_COLOR="1", FORCE_COLOR="0", PATH=PATH_CACHE)
     return env
@@ -392,7 +394,7 @@ def which(exe):
     return shutil.which(exe, path=PATH_CACHE)
 
 
-JOBS = {}  # 安装任务: tool -> {"running", "ok", "log"}
+JOBS = {}  # install jobs: tool -> {"running", "ok", "log"}
 
 
 def doctor(lang="zh"):
@@ -445,11 +447,11 @@ def node_version(node):
 
 
 def ensure_node(log, lang="zh"):
-    """返回要用的 npm：优先已下载的独立 Node；系统 Node >= 20 就用系统的；否则下载 Node 22。"""
+    """Return the npm to use: a downloaded standalone Node first, the system Node if it is >= 20, otherwise download Node 22."""
     if (NODE_DIR / "bin" / "npm").exists():
         return str(NODE_DIR / "bin" / "npm")
     first_old = ""
-    for d in search_path().split(os.pathsep):  # 按 PATH 顺序找第一个 Node 20+（如 nvm 装的）
+    for d in search_path().split(os.pathsep):  # first Node 20+ in PATH order (for example one installed by nvm)
         node, npm = os.path.join(d, "node"), os.path.join(d, "npm")
         if d == str(NODE_DIR / "bin") or not (os.access(node, os.X_OK) and os.path.exists(npm)):
             continue
@@ -506,7 +508,7 @@ def start_install(tool, lang="zh"):
     def work():
         global PATH_CACHE
         try:
-            if script:  # 官方安装脚本（如 Antigravity CLI，装到 ~/.local/bin）
+            if script:  # official install script (e.g. Antigravity CLI, installs to ~/.local/bin)
                 log(f"$ {script}\n")
                 p = subprocess.Popen(["/bin/bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, env=child_env(), stdin=subprocess.DEVNULL, bufsize=1)
@@ -519,7 +521,7 @@ def start_install(tool, lang="zh"):
             PATH_CACHE = search_path()
             log(f"$ npm install -g --prefix ~/.ai-arena/npm-global {pkg}\n")
             env = child_env()
-            env["PATH"] = str(Path(npm).parent) + os.pathsep + PATH_CACHE  # 让 npm 用对应的 node
+            env["PATH"] = str(Path(npm).parent) + os.pathsep + PATH_CACHE  # make npm use the matching node
             p = subprocess.Popen([npm, "install", "-g", "--prefix", str(NPM_PREFIX), pkg],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                  env=env, stdin=subprocess.DEVNULL, bufsize=1)
@@ -553,11 +555,11 @@ def open_login(tool, lang="zh"):
     script.write_text(f"#!/bin/bash\nexport PATH={shlex.quote(PATH_CACHE)}\necho {shlex.quote(title)}\n"
                       f"echo\n{cmd}\necho\necho {shlex.quote(done)}\n", encoding="utf-8")
     script.chmod(0o755)
-    subprocess.Popen(["/usr/bin/open", str(script)])  # .command 用「终端」打开，无需额外授权
+    subprocess.Popen(["/usr/bin/open", str(script)])  # .command files open in Terminal; no extra permission needed
     return ""
 
 
-# ---------------- 数据库 ----------------
+# ---------------- Database ----------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
   tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
@@ -580,7 +582,7 @@ CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 DB_LOCK = threading.Lock()
 
 
-def migrate(c):  # 旧数据库补列
+def migrate(c):  # add missing columns to older databases
     for table, col in (("runs", "models"), ("outputs", "model"), ("outputs", "actual_model"),
                        ("runs", "efforts"), ("outputs", "effort"), ("runs", "thread"), ("runs", "parent"),
                        ("outputs", "session"), ("runs", "attachments")):
@@ -606,10 +608,10 @@ def q(sql, args=(), one=False):
     return (rows[0] if rows else None) if one else rows
 
 
-# ---------------- Prompt 库 ----------------
-# 内置 prompt：key, (中文 分类, 标题, 内容), (English category, title, text)
+# ---------------- Prompt library ----------------
+# built-in prompts: key, (Chinese category, title, text), (English category, title, text)
 SEED_CATALOG = [
-    # ---- 学习 ----
+    # ---- Learning ----
     ("explain", ("学习", "解释一个概念", "用通俗的语言解释「{{概念}}」：它是什么、为什么重要、一个具体例子，以及常见的误解。"),
      ("Learning", "Explain a concept", "Explain {{concept}} in plain language: what it is, why it matters, a concrete example, and common misconceptions.")),
     ("three-levels", ("学习", "由浅入深讲一遍", "分三个层次讲解「{{主题}}」：先用一个十岁孩子能听懂的比喻，再给大学水平的解释，最后讲专业人士关心的细节和争议。"),
@@ -623,7 +625,7 @@ SEED_CATALOG = [
     ("background", ("学习", "来龙去脉", "讲讲「{{事件或思想}}」的来龙去脉：时代背景、关键人物和转折点、不同学派或立场的主要观点，以及它对今天的影响。最后推荐几本值得读的书。"),
      ("Learning", "Background and history", "Walk me through the story of {{event or idea}}: the context, key people and turning points, the main schools of thought or positions, and its influence today. End with a few books worth reading.")),
 
-    # ---- 写作 ----
+    # ---- Writing ----
     ("polish", ("写作", "润色文字", "润色下面这段文字：保持原意和语气，让表达更清楚、简洁、自然。先给出修改后的版本，再列出主要改动和理由。\n\n{{粘贴文字}}"),
      ("Writing", "Polish text", "Polish the text below. Keep the meaning and tone, and make it clearer, shorter and more natural. Give the revised version first, then list the main changes and why.\n\n{{paste text}}")),
     ("email", ("写作", "写邮件", "帮我写一封邮件给 {{收件人}}，目的是 {{目的}}。语气 {{正式 / 友好 / 简洁}}，控制在 200 字以内，并给一个主题行。要点：\n{{要点}}"),
@@ -637,7 +639,7 @@ SEED_CATALOG = [
     ("strict-editor", ("写作", "严格编辑挑毛病", "像一位严格的编辑那样审读下面的文字：指出逻辑漏洞、论据不足、啰嗦和含糊的地方，按重要程度排序，每条给出修改建议。\n\n{{粘贴文字}}"),
      ("Writing", "Strict editor's review", "Review the text below like a strict editor: point out logical gaps, weak evidence, wordiness and vague spots, ranked by importance, each with a suggested fix.\n\n{{paste text}}")),
 
-    # ---- 编程 ----
+    # ---- Coding ----
     ("code-review", ("编程", "代码审查", "审查下面的代码，按严重程度列出问题（bug、安全、性能、可读性），每条给出修改建议和示例代码：\n\n{{粘贴代码}}"),
      ("Coding", "Code review", "Review the code below. List issues by severity (bugs, security, performance, readability), each with a suggested fix and example code:\n\n{{paste code}}")),
     ("explain-code", ("编程", "解释代码", "逐段解释下面的代码在做什么、为什么这样写，指出其中隐含的假设和可能出问题的边界情况。\n\n{{粘贴代码}}"),
@@ -657,7 +659,7 @@ SEED_CATALOG = [
     ("system-design", ("编程", "系统设计", "设计一个 {{系统}}，预计规模是 {{用户量 / 请求量}}。给出架构（用文字描述）、核心组件、数据模型、关键取舍，以及规模扩大十倍时需要改什么。"),
      ("Coding", "System design", "Design {{system}} for {{users / requests}}. Describe the architecture, core components, data model and key trade-offs, and what would change at ten times the scale.")),
 
-    # ---- 决策 ----
+    # ---- Decisions ----
     ("compare-options", ("决策", "方案对比", "比较 {{方案 A}} 和 {{方案 B}}：分别适合什么场景、优缺点、成本和风险。最后给出你的推荐和理由。"),
      ("Decisions", "Compare two options", "Compare {{option A}} and {{option B}}: where each fits, pros and cons, cost and risk. End with your recommendation and why.")),
     ("decide", ("决策", "帮我做决定", "我在考虑 {{决定}}。我的情况：{{背景}}。请列出支持和反对的理由、关键的不确定因素、最坏情况和应对办法，最后给出你的建议，以及什么情况下应该改变主意。"),
@@ -669,7 +671,7 @@ SEED_CATALOG = [
     ("prioritize", ("决策", "排优先级", "下面是我手头的任务。请按重要和紧急程度排优先级并说明理由，再建议哪些可以推迟、交给别人或者干脆不做：\n\n{{任务列表}}"),
      ("Decisions", "Prioritize tasks", "Here are my tasks. Rank them by importance and urgency with reasons, and suggest which to postpone, delegate or drop:\n\n{{task list}}")),
 
-    # ---- 工作 ----
+    # ---- Work ----
     ("meeting-notes", ("工作", "会议纪要", "把下面的会议记录整理成纪要：结论、决定事项、行动项（负责人和截止日期）、待定问题。\n\n{{粘贴记录}}"),
      ("Work", "Meeting notes", "Turn the notes below into meeting minutes: conclusions, decisions, action items (owner and due date) and open questions.\n\n{{paste notes}}")),
     ("weekly-report", ("工作", "写周报", "根据下面的工作记录写一份周报：本周完成、关键数据、遇到的问题、下周计划。语言简洁，读者是 {{读者}}。\n\n{{工作记录}}"),
@@ -683,7 +685,7 @@ SEED_CATALOG = [
     ("interview-prep", ("工作", "面试准备", "我要面试 {{职位}}，公司是 {{公司}}。请列出 10 个最可能被问到的问题（技术和行为类各一半），每题给出回答思路和要点，再给我 3 个可以反问面试官的问题。"),
      ("Work", "Interview prep", "I'm interviewing for {{role}} at {{company}}. List the 10 most likely questions (half technical, half behavioral), with how to approach each and key points, plus 3 questions I can ask the interviewer.")),
 
-    # ---- 研究 ----
+    # ---- Research ----
     ("research-state", ("研究", "研究现状", "总结「{{主题}}」的研究现状：主要流派和代表人物、关键研究和结论、仍有争议或没有定论的问题。区分已有共识和个别研究的发现，并推荐进一步阅读的资料。"),
      ("Research", "State of research", "Summarize the state of research on {{topic}}: main schools and leading figures, key studies and findings, and open or disputed questions. Separate established consensus from single-study findings, and suggest further reading.")),
     ("market", ("研究", "市场分析", "分析 {{市场或行业}}：市场规模和增长、主要玩家及各自优势、用户需求、趋势和风险。标出哪些数字需要进一步核实。"),
@@ -693,7 +695,7 @@ SEED_CATALOG = [
     ("summarize-article", ("研究", "文章摘要与评价", "用三句话概括下面文章的核心观点，再列出它的主要论据和证据，最后评价论证是否可靠、有没有遗漏的反方观点。\n\n{{粘贴文章}}"),
      ("Research", "Summarize and assess an article", "Summarize the article below in three sentences, list its main arguments and evidence, then judge whether the reasoning holds up and which opposing views it leaves out.\n\n{{paste article}}")),
 
-    # ---- 核查 ----
+    # ---- Fact-check ----
     ("fact-check", ("核查", "事实核查", "核查下面这段话里的事实和数字，逐条标出正确、错误或无法确认，并说明依据：\n\n{{粘贴内容}}"),
      ("Fact-check", "Fact-check", "Fact-check the text below. Mark each claim or number as correct, wrong or unverifiable, and explain why:\n\n{{paste text}}")),
     ("credibility", ("核查", "判断说法是否可信", "我看到这样一个说法：「{{说法}}」。请评估它的可信度：可能的出处、支持和反对的证据、常见的误传版本，以及我自己可以怎样核实。"),
@@ -701,7 +703,7 @@ SEED_CATALOG = [
     ("check-math", ("核查", "核对计算", "检查下面的计算和推理是否正确：逐步重新计算，指出错误，并给出正确结果。\n\n{{粘贴内容}}"),
      ("Fact-check", "Check the math", "Check the calculation and reasoning below: redo it step by step, point out any errors, and give the correct result.\n\n{{paste content}}")),
 
-    # ---- 追问（第二轮用，配合「附上其他模型的回答」） ----
+    # ---- Follow-up (for second rounds, together with "Include the other answers") ----
     ("compare-answers", ("追问", "对比几个回答", "比较上一轮几个模型的回答：哪些结论一致、哪些互相矛盾、谁的论据更可靠。最后综合出一个最好的答案。"),
      ("Follow-up", "Compare the answers", "Compare the models' answers from the last round: where they agree, where they contradict each other, and whose reasoning is stronger. Then combine them into the best answer.")),
     ("find-gaps", ("追问", "补充遗漏", "上一轮的回答有没有遗漏重要的情况、风险或反例？请补充，并说明它们会怎样改变结论。"),
@@ -709,7 +711,7 @@ SEED_CATALOG = [
     ("more-concrete", ("追问", "讲得更具体", "把上面的回答讲得更具体：给出可以直接照着做的步骤、具体的数字，以及一个完整的例子。"),
      ("Follow-up", "Make it concrete", "Make the answer above more concrete: steps I can follow directly, specific numbers, and one complete worked example.")),
 
-    # ---- 文档（配合附件） ----
+    # ---- Documents (for use with attachments) ----
     ("summarize-attachments", ("文档", "总结附件", "总结附件的要点：先用三句话给出结论，再列出关键数据，以及需要我做决定的事项。"),
      ("Documents", "Summarize attachments", "Summarize the attachments: give the conclusion in three sentences, then the key figures and any decisions I need to make.")),
     ("doc-qa", ("文档", "只根据附件回答", "只根据附件内容回答：{{问题}}。引用原文支持你的回答；附件里没有的信息请直接说明，不要推测。"),
@@ -721,13 +723,13 @@ SEED_CATALOG = [
     ("contract", ("文档", "合同要点", "阅读附件中的合同，列出：双方的主要义务、付款和期限、违约责任、终止条款，以及对我不利或需要注意的条款。（这不能代替律师意见。）"),
      ("Documents", "Contract key points", "Read the contract in the attachments and list: each party's main obligations, payment and deadlines, liability for breach, termination terms, and clauses that are unfavorable to me or need attention. (This is not a substitute for legal advice.)")),
 
-    # ---- 翻译 ----
+    # ---- Translation ----
     ("translate", ("翻译", "翻译", "把下面的内容翻译成 {{目标语言}}，保持原意和语气，术语前后一致。遇到有多种译法或文化差异的地方，在译文后简要说明。\n\n{{粘贴内容}}"),
      ("Translation", "Translate", "Translate the text below into {{target language}}, keeping the meaning and tone and using terms consistently. Where there are several possible renderings or cultural differences, add a short note after the translation.\n\n{{paste text}}")),
     ("ja-business-email", ("翻译", "日语商务邮件", "把下面的意思写成一封得体的日语商务邮件（敬语使用恰当），并附上中文对照：\n\n{{要表达的意思}}"),
      ("Translation", "Japanese business email", "Write a polite Japanese business email (with appropriate keigo) that says the following, with an English version alongside:\n\n{{what to say}}")),
 
-    # ---- 生活 ----
+    # ---- Life ----
     ("travel", ("生活", "旅行计划", "帮我规划 {{目的地}} {{天数}} 天的行程。同行：{{人数和同行者}}，预算：{{预算}}，偏好：{{偏好}}。按天列出安排、交通方式、住宿区域建议和注意事项。"),
      ("Life", "Trip plan", "Plan a {{number of days}}-day trip to {{destination}}. Travelers: {{who is going}}. Budget: {{budget}}. Preferences: {{preferences}}. Give a day-by-day plan, how to get around, where to stay, and things to watch out for.")),
     ("buying-advice", ("生活", "购买建议", "我想买 {{产品类型}}，预算 {{预算}}，主要用途是 {{用途}}。请说明选购时最重要的几个参数，推荐几款并做比较，最后给出你的选择。"),
@@ -735,14 +737,14 @@ SEED_CATALOG = [
     ("gift", ("生活", "送礼建议", "给 {{对象}} 选礼物，场合是 {{场合}}，预算 {{预算}}，对方喜欢 {{兴趣}}。给出 8 个建议并说明理由，分成稳妥和有新意两类。"),
      ("Life", "Gift ideas", "Suggest gifts for {{person}} for {{occasion}}, budget {{budget}}; they like {{interests}}. Give 8 ideas with reasons, split into safe choices and more original ones.")),
 
-    # ---- 提示词 ----
+    # ---- Prompting ----
     ("improve-prompt", ("提示词", "优化 prompt", "帮我改进下面这个 prompt，让 AI 的回答更准确、更符合我的需要。先指出它的问题，再给出改写后的版本：\n\n{{原 prompt}}"),
      ("Prompting", "Improve a prompt", "Improve the prompt below so the AI's answer is more accurate and closer to what I need. Point out its problems first, then give the rewritten version:\n\n{{original prompt}}")),
     ("system-prompt", ("提示词", "写系统提示词", "帮我为一个用于 {{用途}} 的 AI 助手写系统提示词：说明它的角色、目标用户、回答风格、必须遵守的规则和不该做的事，并给出两段示例对话。"),
      ("Prompting", "Write a system prompt", "Write a system prompt for an AI assistant used for {{purpose}}: its role, target users, answer style, rules it must follow and things it must not do, plus two example conversations.")),
 ]
 SEED_BY_KEY = {k: (zh, en) for k, zh, en in SEED_CATALOG}
-SEED_BASE_TIME = 1_000_000_000  # 内置 prompt 排在你自己的 prompt 后面，按目录顺序
+SEED_BASE_TIME = 1_000_000_000  # built-in prompts sort after the user's own prompts, in catalog order
 
 
 def _seeded():
@@ -758,11 +760,11 @@ def _add_seeds(keys):
 
 
 def ensure_seeds(restore=False):
-    """放入还没放过的内置 prompt（删掉的不会再回来，除非点「恢复内置 prompt」）。返回新放入的条数。"""
+    """Add built-in prompts that were never added before (deleted ones stay deleted unless "Restore built-in prompts" is used). Return how many were added."""
     with SEED_LOCK:
         seeded = _seeded()
         if not seeded and q("SELECT v FROM settings WHERE k='prompts_seeded'", one=True):
-            # 上一版放进去的 5 条示例没有 seed 标记：按内容认出来，补上标记
+            # the 5 examples added by the previous version have no seed key: recognize them by content and tag them
             for row in q("SELECT id, title, body FROM prompts WHERE seed=''"):
                 for i, (k, zh, en) in enumerate(SEED_CATALOG):
                     if (row["title"], row["body"]) in ((zh[1], zh[2]), (en[1], en[2])):
@@ -780,7 +782,7 @@ def ensure_seeds(restore=False):
 def list_prompts(lang="zh"):
     ensure_seeds()
     rows = q("SELECT * FROM prompts ORDER BY pinned DESC, created_at DESC")
-    for r in rows:  # 内置 prompt 按界面语言显示
+    for r in rows:  # built-in prompts are shown in the interface language
         if r.get("seed") in SEED_BY_KEY:
             zh, en = SEED_BY_KEY[r["seed"]]
             r["category"], r["title"], r["body"] = en if lang == "en" else zh
@@ -807,7 +809,7 @@ def save_prompt(b):
     return q("SELECT * FROM prompts WHERE id=?", (pid,), one=True)
 
 
-# ---------------- 运行管理 ----------------
+# ---------------- Run management ----------------
 class Run:
     def __init__(self, rid, tools):
         self.id, self.events, self.cond = rid, [], threading.Condition()
@@ -825,7 +827,7 @@ RUNS = {}
 
 
 class ClaudeStream:
-    """解析 `claude -p --output-format stream-json` 的 JSONL；非 JSON 行原样输出。"""
+    """Parse the JSONL from `claude -p --output-format stream-json`; non-JSON lines are passed through as text."""
 
     def __init__(self):
         self.buf, self.delta, self.text_seen = "", False, False
@@ -913,7 +915,7 @@ class LineParser:
 
 
 class CodexJson(LineParser):
-    """解析 `codex exec --json` 的 JSONL（thread.started / item.* / turn.*）。"""
+    """Parse the JSONL from `codex exec --json` (thread.started / item.* / turn.*)."""
 
     def __init__(self, lang="zh"):
         super().__init__(lang)
@@ -950,7 +952,7 @@ class CodexJson(LineParser):
 
 
 def deep_find(o, keys, depth=0):
-    """在嵌套的 dict / list 里找第一个非空字符串字段。"""
+    """Find the first non-empty string field in nested dicts / lists."""
     if depth > 6:
         return ""
     if isinstance(o, dict):
@@ -971,8 +973,9 @@ def deep_find(o, keys, depth=0):
 
 
 class AgyStream(LineParser):
-    """解析 `agy -p … --output-format stream-json` 的 NDJSON（init / step_update / result）。
-    字段位置按文档优先，找不到时在整条事件里递归查找；仍没解析出文字时，把原始输出写进过程日志。"""
+    """Parse the NDJSON from `agy -p … --output-format stream-json` (init / step_update / result).
+    Documented field locations are tried first, then a recursive search over the whole event; if still no text
+    is found, the raw output is written to the process log."""
 
     def __init__(self, lang="zh"):
         super().__init__(lang)
@@ -1047,10 +1050,10 @@ CHAT_PREFIX = {
 }
 Q_LABEL = {"zh": "问题：\n", "en": "Question:\n"}
 
-# ---------------- 附件 ----------------
+# ---------------- Attachments ----------------
 MAX_UPLOAD_MB = 50
-FILE_CHARS = 60000      # 每个附件最多放进问题的字数
-TOTAL_CHARS = 100000    # 所有附件合计上限（命令行参数长度有限）
+FILE_CHARS = 60000      # maximum characters per attachment included in the question
+TOTAL_CHARS = 100000    # total for all attachments (command-line arguments have a length limit)
 TEXT_EXT = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".xml", ".html", ".htm", ".yaml", ".yml",
             ".log", ".ini", ".toml", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".c", ".cpp", ".h",
             ".cs", ".rb", ".php", ".sh", ".sql", ".swift", ".kt", ".css", ".scss", ".vue", ".r", ".m", ".tex", ".srt", ".vtt"}
@@ -1128,7 +1131,7 @@ def _xlsx_text(path, max_rows=3000):
                     else:
                         val = v.text if v is not None and v.text is not None else ""
                     if val == "" and c.find(SS + "f") is not None and c.find(SS + "f").text:
-                        val = "=" + c.find(SS + "f").text  # 没有缓存结果的公式，给出公式本身
+                        val = "=" + c.find(SS + "f").text  # formula without a cached result: show the formula itself
                     cells.append(val)
                 while cells and cells[-1] == "":
                     cells.pop()
@@ -1164,7 +1167,7 @@ def _pdf_text(path):
         r = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(path), "-"], capture_output=True, timeout=120)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.decode("utf-8", "replace"), "pdftotext"
-    if sys.platform == "darwin":  # macOS 自带 PDFKit，不需要安装任何东西
+    if sys.platform == "darwin":  # PDFKit ships with macOS; nothing to install
         r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", "-e", JXA_PDF, str(path)],
                            capture_output=True, timeout=120)
         if r.returncode == 0 and r.stdout.strip():
@@ -1183,7 +1186,7 @@ def _read_text_file(path):
 
 
 def extract_text(path):
-    """返回 (文字, 方式)。提取不了时文字为空，工具仍可按路径打开原文件。"""
+    """Return (text, method). When nothing can be extracted the text is empty; tools can still open the original file by path."""
     ext = Path(path).suffix.lower()
     try:
         if ext in TEXT_EXT:
@@ -1206,7 +1209,7 @@ def extract_text(path):
 
 
 def save_upload(name, stream, length):
-    """写入暂存区并提取文字，返回附件信息。"""
+    """Write an upload to the staging area, extract its text, and return the attachment info."""
     uid = uuid.uuid4().hex[:12]
     d = ATTACH_DIR / "_staging" / uid
     d.mkdir(parents=True, exist_ok=True)
@@ -1232,7 +1235,7 @@ def save_upload(name, stream, length):
 
 
 def claim_attachments(ids, rid, lang):
-    """把暂存区的附件移到这一轮的目录，返回附件信息列表。"""
+    """Move staged attachments into this round's folder and return the list of attachment info."""
     metas = []
     for uid in [str(x) for x in ids or []][:20]:
         if not re.fullmatch(r"[0-9a-f]{12}", uid):
@@ -1250,7 +1253,7 @@ def claim_attachments(ids, rid, lang):
 
 
 def attachment_block(metas, lang, budget=TOTAL_CHARS, per_file=FILE_CHARS, with_paths=True):
-    """把附件拼成一段文字：提取出的内容 + 原文件路径（工具可以只读打开）。"""
+    """Build one block of text from the attachments: the extracted content plus the original file paths (tools may open them read-only)."""
     if not metas:
         return ""
     en = lang == "en"
@@ -1291,7 +1294,7 @@ def attachment_block(metas, lang, budget=TOTAL_CHARS, per_file=FILE_CHARS, with_
 
 
 def copy_attachments(src_rid):
-    """重跑时：把某一轮的附件复制回暂存区，返回新的附件 ID。"""
+    """On rerun: copy a round's attachments back to staging and return the new attachment IDs."""
     r = q("SELECT attachments FROM runs WHERE id=?", (src_rid,), one=True)
     ids = []
     for m in json.loads((r or {}).get("attachments") or "[]"):
@@ -1323,7 +1326,7 @@ PEER_CHARS, PEERS_TOTAL = 12000, 36000
 
 
 def peer_block(peers, lang="zh"):
-    """追问时，把上一轮其他模型的回答（标明模型）附给当前工具，便于跨模型比较。"""
+    """For follow-ups: give the current tool the other models' answers from the previous round (labeled by model) for cross-model comparison."""
     if not peers:
         return ""
     en = lang == "en"
@@ -1365,14 +1368,14 @@ def kill(p):
         pass
 
 
-MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # 如 Codex 在 stderr 打印的 "model: gpt-…"
+MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # e.g. "model: gpt-…" printed by Codex on stderr
 
 
 def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False,
               peers=None,
               attach="", attach_dir=""):
     base, extra, note = list(spec["cmd"]), [], ""
-    if attach_dir and cwd and spec.get("add_dir_args"):  # 指定了工作目录时，另外允许读附件目录
+    if attach_dir and cwd and spec.get("add_dir_args"):  # with a working folder set, also allow reading the attachments folder
         extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
@@ -1386,10 +1389,10 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         extra += rargs
     if extra:
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
-        if i > 0 and base[i - 1].startswith("-"):  # 如 agy -p {prompt}：插到 -p 前面，避免拆开 "-p 问题"
+        if i > 0 and base[i - 1].startswith("-"):  # e.g. agy -p {prompt}: insert before -p so "-p question" stays together
             i -= 1
         base[i:i] = extra
-    if rargs and spec.get("resume_pos") == "prompt":  # 子命令形式，紧挨在问题前面
+    if rargs and spec.get("resume_pos") == "prompt":  # subcommand form: placed right before the question
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
         base[i:i] = rargs
     lang = getattr(run, "lang", "zh")
@@ -1399,12 +1402,12 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         prompt = build_transcript(history, prompt, lang)
         note = M(lang, "resume_transcript", n=len(history))
     pblock = peer_block(peers, lang)
-    if attach or pblock:  # 附件内容、其他模型的回答放在问题前面
+    if attach or pblock:  # attachment content and the other models' answers go before the question
         prompt = attach + pblock + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
     if pblock:
         note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
     uses_openai = spec.get("transport") == "openai_responses"
-    if chat and not uses_openai:  # 聊天模式：只在发给工具时加指令，保存的问题保持原样
+    if chat and not uses_openai:  # chat mode: instructions are added only when sending to the tool; the stored question stays unchanged
         prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach or pblock else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
@@ -1423,7 +1426,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
                   chars=f"{len(attach):,}")
     env = child_env()
     stripped = [k for k in spec.get("strip_env") or [] if env.pop(k, None) is not None]
-    if stripped:  # 例如 ANTHROPIC_API_KEY 会盖过 claude.ai 订阅登录
+    if stripped:  # e.g. ANTHROPIC_API_KEY would override the claude.ai subscription sign-in
         note += M(lang, "env_stripped", names=", ".join(stripped))
     if note:
         log.append(note)
@@ -1445,9 +1448,9 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             import pty, termios, fcntl, struct
             out_fd, slave = pty.openpty()
             attrs = termios.tcgetattr(slave)
-            attrs[1] &= ~termios.OPOST  # 不把 \n 改成 \r\n
+            attrs[1] &= ~termios.OPOST  # do not turn \n into \r\n
             termios.tcsetattr(slave, termios.TCSANOW, attrs)
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 200, 400, 0, 0))  # 宽一些，避免折行
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 200, 400, 0, 0))  # wider, to avoid line wrapping
             env["TERM"] = "dumb"
             try:
                 p = subprocess.Popen([exe] + cmd[1:], stdout=slave, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
@@ -1491,7 +1494,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             while True:
                 try:
                     b = os.read(fd, 4096)
-                except OSError:  # 伪终端在子进程退出后返回 EIO
+                except OSError:  # the pseudo-terminal returns EIO after the child process exits
                     b = b""
                 txt = dec.decode(b, final=not b)
                 if ptx and not is_err:
@@ -1545,12 +1548,12 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         if not run.pending:
             run.finished_at = time.time()
             run.events.append({"type": "end"})
-            if run.judge and not run.cancelled:  # 自动评分
+            if run.judge and not run.cancelled:  # automatic scoring
                 threading.Thread(target=start_judge, args=(run.id, run.judge_model, run.lang), daemon=True).start()
         run.cond.notify_all()
 
 
-# ---------------- 评分（Grok 等第三方模型匿名评审） ----------------
+# ---------------- Scoring (anonymous review by Grok or another third-party model) ----------------
 JUDGING = set()
 JUDGE_KEYS = ("accuracy", "completeness", "clarity", "usefulness")
 
@@ -1658,7 +1661,7 @@ def parse_judge(text):
 
 
 def norm_conflicts(o, mapping):
-    """把评审给出的共识和分歧整理好，匿名标签换回工具名。"""
+    """Clean up the judge's consensus and conflicts, and map the anonymous labels back to tool names."""
     def lab(k):
         k = str(k).strip().upper().replace("回答", "").replace("ANSWER", "").strip()
         return mapping.get(k)
@@ -1715,12 +1718,12 @@ def start_judge(rid, model="", lang="zh"):
     thread = run.get("thread") or rid
     earlier = [x["prompt"] for x in q("SELECT prompt FROM runs WHERE (id=? OR thread=?) AND created_at<? "
                                        "ORDER BY created_at", (thread, thread, run["created_at"]))]
-    random.shuffle(outs)  # 打乱顺序并匿名，避免位置和品牌偏差
+    random.shuffle(outs)  # shuffle and anonymize to avoid position and brand bias
     labels = "ABCDEFGH"
     mapping = {labels[i]: o["tool"] for i, o in enumerate(outs)}
     prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)], lang)
     metas = json.loads(run.get("attachments") or "[]")
-    if metas:  # 附件内容也给评审，用来核对回答对附件的理解
+    if metas:  # give the judge the attachment content too, to check the answers' understanding of it
         prompt = (("The question came with attachments. Their text is below for checking the answers.\n\n" if lang == "en"
                    else "提问时附带了附件，下面是附件的文字内容，供你核对回答是否准确。\n\n")
                   + attachment_block(metas, lang, budget=40000, per_file=20000, with_paths=False) + prompt)
@@ -1741,7 +1744,7 @@ def start_judge(rid, model="", lang="zh"):
         status, best, reason, result, raw = "error", "", "", {}, ""
         last = [0.0]
 
-        def progress(text):  # 每 2 秒把已有输出存一次，页面可以看到进度
+        def progress(text):  # save the output so far every 2 seconds so the page can show progress
             if time.time() - last[0] > 2:
                 last[0] = time.time()
                 q("UPDATE judgments SET raw=?, seconds=? WHERE run_id=?", (text[-20000:], round(time.time() - t0, 1), rid))
@@ -1783,7 +1786,7 @@ def start_judge(rid, model="", lang="zh"):
 
 
 def run_streaming(exe, args, spec, cwd, timeout, on_text):
-    """运行一个 CLI，边读边回调 on_text(累计输出)。返回 (退出码或 None=超时, 输出, stderr)。"""
+    """Run a CLI and call on_text(accumulated output) as it reads. Return (exit code or None on timeout, output, stderr)."""
     env = child_env()
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     buf, err, out_fd = [], [], None
@@ -1850,7 +1853,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     cfg = load_cfg()
     on = enabled_tools(cfg)
     thread, parent_id, sessions, histories, prev = "", "", {}, {}, []
-    if parent:  # 追问：沿用上一轮的工具、模型、effort、目录，并找各工具的会话 ID
+    if parent:  # follow-up: reuse the previous round's tools, models, effort and folder, and find each tool's session ID
         p = q("SELECT * FROM runs WHERE id=?", (parent,), one=True)
         if not p:
             raise ValueError(M(lang, "parent_missing"))
@@ -1871,7 +1874,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
             histories[t] = [(x["prompt"], x["output"] or "") for x in rows]
             ok = [x["session"] for x in rows if x["session"] and x["status"] == "ok"]
             sessions[t] = ok[-1] if ok else ""
-        if share_peers:  # 被追问那一轮的全部成功回答，带模型名
+        if share_peers:  # all successful answers from the round being followed up, with model names
             outs = q("SELECT tool, output, status, model, actual_model FROM outputs WHERE run_id=?", (parent_id,))
             for o in sorted(outs, key=lambda o: tools.index(o["tool"]) if o["tool"] in tools else 99):
                 if o["status"] == "ok" and (o["output"] or "").strip() and o["tool"] in cfg["tools"]:
@@ -1883,7 +1886,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     if not tools:
         raise ValueError("Select at least one tool." if lang == "en" else "至少选择一个参赛工具。")
     for rid0 in [k for k, r in RUNS.items() if r.finished_at and time.time() - r.finished_at > 1800]:
-        RUNS.pop(rid0, None)  # 完成 30 分钟后从内存移除，之后从数据库回放
+        RUNS.pop(rid0, None)  # remove from memory 30 minutes after finishing; replay from the database after that
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     models = {t: str((models or {}).get(t) or "").strip() for t in tools}
     efforts = {t: e if re.fullmatch(r"[a-z]{1,12}", e := str((efforts or {}).get(t) or "").strip()) else ""
@@ -1894,7 +1897,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         cfg["tools"][t].get("transport") == "openai_responses" for t in tools
     ) else ""
     attach_dir = str(ATTACH_DIR / rid) if metas else ""
-    run_cwd = cwd or attach_dir or None  # 没指定工作目录时，在附件目录里运行，工具能直接读到附件
+    run_cwd = cwd or attach_dir or None  # without a working folder, run in the attachments folder so tools can read the attachments directly
     peers = {t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
     shared = any(peers.values())
     q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments, peers) "
@@ -1969,7 +1972,7 @@ class H(BaseHTTPRequestHandler):
     def _guard(self, u):
         self.lang = "en" if (self.headers.get("X-Arena-Lang") or "").lower().startswith("en") else "zh"
         if self.headers.get("Host") not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
-            self._json({"error": "bad host"}, 403)  # 防 DNS rebinding
+            self._json({"error": "bad host"}, 403)  # guard against DNS rebinding
             return False
         if u.path == "/":
             return True
@@ -1988,7 +1991,7 @@ class H(BaseHTTPRequestHandler):
         qs = {k: v[0] for k, v in parse_qs(u.query).items()}
         p = u.path
         if p == "/":
-            page_file = HERE / "arena.html"  # 同目录有 arena.html 就用它，方便单独改界面
+            page_file = HERE / "arena.html"  # use arena.html from the same folder if present, so the interface can be edited separately
             src = page_file.read_text(encoding="utf-8") if page_file.exists() else PAGE
             body = src.replace("__TOKEN__", TOKEN).encode()
             self.send_response(200)
@@ -2020,7 +2023,7 @@ class H(BaseHTTPRequestHandler):
                                       "ready": v.get("transport") != "openai_responses" or openai_ready()}
                                   for k, v in cfg["tools"].items()},
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags})
-        elif p.startswith("/api/file/"):  # 打开某一轮的附件原文件
+        elif p.startswith("/api/file/"):  # open an attachment's original file for a round
             parts = p.split("/")
             if len(parts) != 6:
                 return self._json({"error": "not found"}, 404)
@@ -2085,7 +2088,7 @@ class H(BaseHTTPRequestHandler):
         if not self._guard(u):
             return
         p = u.path
-        if p == "/api/upload":  # 原始字节上传，文件名放在 X-File-Name（URL 编码）
+        if p == "/api/upload":  # raw byte upload; the file name is in X-File-Name (URL-encoded)
             n = int(self.headers.get("Content-Length") or 0)
             if n > MAX_UPLOAD_MB * 1024 * 1024:
                 return self._json({"error": M(self.lang, "too_big", mb=MAX_UPLOAD_MB)}, 413)
@@ -2173,7 +2176,7 @@ class H(BaseHTTPRequestHandler):
         elif p == "/api/winner":
             q("UPDATE runs SET winner=? WHERE id=?", (b.get("winner") or "", b["run_id"]))
             self._json({"ok": True})
-        elif p.startswith("/api/delete/"):  # 删除首问时连同整条对话一起删除
+        elif p.startswith("/api/delete/"):  # deleting the first question deletes the whole conversation
             rid = p.rsplit("/", 1)[1]
             for x in q("SELECT id FROM runs WHERE id=? OR thread=?", (rid, rid)):
                 shutil.rmtree(ATTACH_DIR / safe_name(x["id"]), ignore_errors=True)
@@ -2192,7 +2195,7 @@ class H(BaseHTTPRequestHandler):
         send = lambda ev: self.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode())
         try:
             run = RUNS.get(rid)
-            if not run:  # 已不在内存：从数据库回放
+            if not run:  # no longer in memory: replay from the database
                 for o in q("SELECT * FROM outputs WHERE run_id=?", (rid,)):
                     send({"tool": o["tool"], "type": "start", "cmd": o["cmd"], "model": o.get("model") or "",
                           "effort": o.get("effort") or ""})
@@ -2226,7 +2229,7 @@ PAGE = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Arena</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cdefs%3E%3ClinearGradient id=%22ag%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234C8DFF%22/%3E%3Cstop offset=%22.55%22 stop-color=%22%236D6AF7%22/%3E%3Cstop offset=%221%22 stop-color=%22%23A47CF2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2232%22 height=%2232%22 rx=%229%22 fill=%22url%28%23ag%29%22/%3E%3Crect x=%228%22 y=%2210%22 width=%224%22 height=%2214%22 rx=%222%22 fill=%22%23fff%22/%3E%3Crect x=%2214%22 y=%2215%22 width=%224%22 height=%229%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.88%22/%3E%3Crect x=%2220%22 y=%2212.5%22 width=%224%22 height=%2211.5%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.76%22/%3E%3Ccircle cx=%2224.6%22 cy=%227.4%22 r=%221.7%22 fill=%22%23fff%22/%3E%3C/svg%3E">
-<!-- 内嵌 marked 12.0.2（MIT）与 DOMPurify 3.1.6（Apache-2.0/MPL-2.0），离线也能排版 -->
+<!-- marked 12.0.2 (MIT) and DOMPurify 3.1.6 (Apache-2.0/MPL-2.0) are inlined so formatting works offline -->
 <script>/**
  * marked v12.0.2 - a markdown parser
  * Copyright (c) 2011-2024, Christopher Jeffrey. (MIT Licensed)
@@ -2268,7 +2271,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .wrap{max-width:1480px;margin:0 auto;padding:0 28px}
 .sp{flex:1}
 
-/* 顶栏 */
+/* Top bar */
 .top{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--paper) 62%,transparent);backdrop-filter:saturate(1.4) blur(10px);-webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
 .top .wrap{display:flex;align-items:center;gap:26px;height:56px}
 .brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:16px;letter-spacing:-.01em}
@@ -2284,7 +2287,7 @@ nav button.on{background:var(--solid);color:var(--ink);font-weight:600;box-shado
 .langsw button{border:0;background:none;padding:3px 10px;border-radius:7px;font-size:12.5px;color:var(--muted);cursor:pointer}
 .langsw button.on{background:var(--solid);color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(40,70,140,.15)}
 
-/* 通用按钮 */
+/* Buttons */
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 14px;cursor:pointer;white-space:nowrap}
 .btn:hover{border-color:color-mix(in srgb,var(--ink) 30%,var(--line))}
 .btn:disabled{opacity:.45;cursor:default}
@@ -2301,7 +2304,7 @@ nav button.on{background:var(--solid);color:var(--ink);font-weight:600;box-shado
 .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none}
 input.field,select.field{border:1px solid var(--line);background:var(--solid);border-radius:8px;padding:6px 10px;min-width:0}
 
-/* 输入区 */
+/* Composer */
 .composer{margin:26px 0 18px;background:var(--surface);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:16px 16px 14px;transition:box-shadow .2s,border-color .2s}
 .composer:focus-within{border-color:color-mix(in srgb,var(--focus) 45%,var(--line));box-shadow:0 0 0 4px color-mix(in srgb,var(--focus) 12%,transparent),0 18px 44px -22px rgba(70,100,230,.55)}
 .cin{display:flex;gap:12px;align-items:flex-end}
@@ -2325,7 +2328,7 @@ input.field,select.field{border:1px solid var(--line);background:var(--solid);bo
 #tag{width:170px}#cwd{flex:1;max-width:420px}
 kbd{font:11.5px var(--ui);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--solid)}
 
-/* 对比流 */
+/* Feed */
 .feedhead{display:flex;align-items:center;gap:10px;margin:6px 2px 10px;color:var(--muted);font-size:13px}
 .feedhead h2{font-size:13px;font-weight:500;margin:0}
 #empty{padding:56px 20px;text-align:center;color:var(--muted)}
@@ -2474,7 +2477,7 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 #sjudge{margin-top:22px}
 #sjudge h3{font-size:14px;margin:0 0 10px}
 
-/* 单列 */
+/* Answer column */
 .col{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--solid);overflow:hidden}
 .col::before{content:"";position:absolute;inset:0 0 auto;height:2px;background:var(--c)}
 .col.won{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold)}
@@ -2504,7 +2507,7 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 .ph a{color:var(--focus)}
 .thinking::after{content:"…";animation:pulse 1.2s infinite}
 
-/* 回答排版 */
+/* Answer formatting */
 .md{font:15.5px/1.85 var(--read);word-break:break-word}
 .md>:first-child{margin-top:8px}
 .md h1,.md h2,.md h3,.md h4{line-height:1.4;margin:1.2em 0 .5em}
@@ -2524,7 +2527,7 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 .md pre:hover .pcopy,.pcopy:focus{opacity:1}
 .rawtxt{white-space:pre-wrap;font:12.5px/1.65 var(--mono);background:var(--soft);padding:12px;border-radius:8px}
 
-/* 阅读模式 */
+/* Reader mode */
 #reader{position:fixed;inset:0;z-index:50;background:color-mix(in srgb,#14204a 38%,transparent);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;justify-content:center;padding:24px;animation:fade .15s}
 @keyframes fade{from{opacity:0}}
 .rp{width:min(980px,100%);max-height:100%;display:flex;flex-direction:column;background:var(--solid);border-radius:16px;box-shadow:0 30px 80px -20px rgba(0,0,0,.45);overflow:hidden}
@@ -2538,7 +2541,7 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 #rdoc .ph,#rdoc .rawtxt{max-width:46em;margin-left:auto;margin-right:auto}
 .rhint{color:var(--muted);font-size:12px;padding:0 8px}
 
-/* 其他页面 */
+/* Other pages */
 .page{padding:26px 0 60px}
 .bar{display:flex;gap:10px;align-items:center;margin-bottom:14px}
 .list{list-style:none;padding:0;margin:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
@@ -2681,7 +2684,7 @@ const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6
   star:'<path d="m8 2.3 1.75 3.55 3.9.57-2.83 2.76.67 3.9L8 11.24l-3.49 1.84.67-3.9-2.83-2.76 3.9-.57z"/>',
   pen:'<path d="m10.8 2.7 2.5 2.5-7.6 7.6H3.2v-2.5z"/>',trash:'<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
-/* ---------- 语言 ---------- */
+/* ---------- Language ---------- */
 const I18N={zh:{
  'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
  'cancel':'取消','pp.btn':'Prompt 库','pp.title':'Prompt 库','pp.new':'新建','pp.close':'收起','pp.search':'搜索标题或内容','pp.saveCur':'存当前输入',
@@ -2806,9 +2809,9 @@ function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),hm=d.toLocaleTimeStr
 function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.textContent=t;setTimeout(()=>{b.innerHTML=o;delete b.dataset.f},1100)}
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
-/* ---------- 配置与模型选择 ---------- */
+/* ---------- Config and model pickers ---------- */
 let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
-const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // 没设置 API Key 时一律不显示
+const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // hidden whenever no API key is set
 const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
 const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
 const color=t=>CFG.tools[t]?.color||'#8893a3';
@@ -2839,8 +2842,8 @@ $('#lanes').addEventListener('change',e=>{const s=e.target.closest('select');if(
   else SEL[t].model=s.value;
   ls.set('arenaSel',SEL);renderLanes()});
 
-/* ---------- 对话线程与每一轮 ---------- */
-// 一张卡片 = 一个对话线程（th）；线程里每次提问 = 一轮（r），每轮单独打分、计入统计
+/* ---------- Conversation threads and rounds ---------- */
+// one card = one conversation thread (th); each question in it = one round (r), scored and counted separately
 const ROUNDS=new Map(),TURNS=new Map(),feed=$('#feed');
 const segCls=st=>!st?'':st==='run'?'run':st==='ok'?'ok':'bad';
 function stateOf(s){if(!s.status)return[T('st.queued'),''];if(s.status==='run')return[T('st.run'),'run'];if(s.status==='ok')return[T('st.ok'),'ok'];
@@ -2909,7 +2912,7 @@ function makeTurn(th,meta,idx){
   for(const t of r.tools){r.S[t]={out:'',log:'',status:'',secs:null,t0:null,raw:false,score:0,note:'',model:r.models[t]||'',effort:r.efforts[t]||'',actual:'',full:false};makeCol(r,t,$('.cols',el))}
   paintWinner(r);return r;
 }
-function fillTurn(r,d){   // 已完成的轮次直接用数据库里的结果；还在跑的才接流
+function fillTurn(r,d){   // finished rounds use the stored results; only running ones attach to the stream
   r.winner=d.winner||'';r.autoJudge=!!d.auto_judge;
   if(d.judgment){renderJudge(r,d.judgment);if(d.judgment.running)pollJudge(r)}
   for(const x of d.ratings||[])if(r.S[x.tool]){Object.assign(r.S[x.tool],{score:x.score,note:x.note||''});$('.note',r.S[x.tool].el).value=x.note||'';paintStars(r,x.tool)}
@@ -3003,7 +3006,7 @@ function paintWinner(r){const w=r.winner;
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
 
-/* ---------- Prompt 库（右侧面板） ---------- */
+/* ---------- Prompt library (right-side panel) ---------- */
 const PP={items:[],cat:'',q:'',edit:null,target:null,loaded:false};
 const PH_RE=/\{\{[^{}\n]*\}\}/g;
 const ppDocked=()=>matchMedia('(min-width:1200px)').matches;
@@ -3014,7 +3017,7 @@ function ppOpen(on){
 async function ppLoad(){try{PP.items=await api('/api/prompts');PP.loaded=true;ppRender()}catch(e){toast(e)}}
 function ppRender(){
   $('#ppN').textContent=PP.items.length?String(PP.items.length):'';
-  const cats=[...new Set([...PP.items].sort((a,b)=>b.created_at-a.created_at).map(x=>x.category).filter(Boolean))];  // 你的分类在前，内置分类按目录顺序
+  const cats=[...new Set([...PP.items].sort((a,b)=>b.created_at-a.created_at).map(x=>x.category).filter(Boolean))];  // your categories first, then built-in categories in catalog order
   if(PP.cat&&!cats.includes(PP.cat))PP.cat='';
   $('#ppCats').innerHTML=cats.length?[['',T('pp.all')],...cats.map(c=>[c,c])].map(([v,l])=>`<button type="button" data-c="${esc(v)}" aria-pressed="${PP.cat===v}">${esc(l)}</button>`).join(''):'';
   $('#ppCatList').innerHTML=cats.map(c=>`<option value="${esc(c)}">`).join('');
@@ -3048,7 +3051,7 @@ function ppInsert(x){
   if(!ppDocked())ppOpen(false);
 }
 document.addEventListener('focusin',e=>{if(e.target.matches('#prompt,.fq'))PP.target=e.target});
-document.addEventListener('keydown',e=>{  // Tab 跳到下一个 {{占位}}
+document.addEventListener('keydown',e=>{  // Tab jumps to the next {{placeholder}}
   const ta=e.target;if(e.key!=='Tab'||e.shiftKey||e.altKey||e.metaKey||e.ctrlKey||!ta.matches?.('#prompt,.fq'))return;
   PH_RE.lastIndex=0;if(!PH_RE.test(ta.value))return;
   e.preventDefault();selectPlaceholder(ta,ta.selectionEnd);
@@ -3083,7 +3086,7 @@ function ppInit(){
   if(ls.get('arenaPP',false))ppOpen(true);
 }
 
-/* ---------- 动态模型列表（agy models 在后台读取，读到后补进下拉框） ---------- */
+/* ---------- Dynamic model lists (agy models is read in the background and added to the picker when ready) ---------- */
 function modelsLater(n){
   if(n>=6||!CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length))return;
   setTimeout(async()=>{try{const c=await api('/api/config');let got=false;
@@ -3091,7 +3094,7 @@ function modelsLater(n){
     if(got)renderLanes()}catch(e){}modelsLater(n+1)},10000);
 }
 
-/* ---------- 附件 ---------- */
+/* ---------- Attachments ---------- */
 const fmtSize=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
 const kindTag=a=>({Word:'DOC',Excel:'XLS',PowerPoint:'PPT',PDF:'PDF',RTF:'RTF',ODT:'ODT',CSV:'CSV',image:'IMG',text:'TXT'}[a.kind]||(a.ext||'').replace('.','').slice(0,4).toUpperCase()||'FILE');
 const attStatus=a=>a.chars>0?T('att.chars',a.chars.toLocaleString()):a.kind==='image'?T('att.image'):T('att.noText');
@@ -3123,7 +3126,7 @@ const fileUrl=(rid,a)=>`/api/file/${encodeURIComponent(rid)}/${encodeURIComponen
 function attLinks(rid,list){return (list||[]).map(a=>`<a class="att" href="${fileUrl(rid,a)}" target="_blank" rel="noopener" title="${esc(T('att.open'))}"><span class="ak">${esc(kindTag(a))}</span><span class="an">${esc(a.name)}</span><span class="as">${esc(attStatus(a))}</span></a>`).join('')}
 let COMPOSER_ATT=null;
 
-/* ---------- 评分（匿名交给第三方模型） ---------- */
+/* ---------- Scoring (anonymous review by a third-party model) ---------- */
 let JSEL={model:'',auto:false},CHAT=true,PEERS=(()=>{try{return localStorage.getItem('arenaPeers')!=='false'}catch(e){return true}})();
 function renderJudgeOpt(){
   const box=$('#judgeOpt');if(!CFG.judge){box.hidden=true;return}
@@ -3146,7 +3149,7 @@ function pollJudge(r,waitStart){
     catch(e){if(waitStart&&tries<8)r.jt=setTimeout(tick,1500)}};
   r.jt=setTimeout(tick,waitStart?1200:2000);
 }
-function deanon(t,map){  // 把 Grok 点评里的匿名标签（回答 A、A 比 C）换回工具名
+function deanon(t,map){  // map the anonymous labels in Grok's comments (Answer A, A vs C) back to tool names
   const nm=l=>map&&map[l]?tname(map[l]):null;
   return String(t||'').replace(/(?:回答|Answer|Response)\s*([A-H])\b/g,(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
@@ -3172,7 +3175,7 @@ function renderJudge(r,j){
   const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
 }
 
-function renderConflicts(r,j){  // 共识和分歧：每家的说法放在对应回答那一列下面
+function renderConflicts(r,j){  // consensus and conflicts: each tool's position sits under that tool's answer column
   const box=$('.dis',r.el);if(!box)return;
   const res=j.result||{},cons=res.consensus_n||[],conf=res.conflicts_n||[];
   if(!cons.length&&!conf.length){box.hidden=true;box.innerHTML='';return}
@@ -3247,7 +3250,7 @@ async function openRun(id){
   setOpen(th,true);th.el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-/* ---------- 阅读模式 ---------- */
+/* ---------- Reader mode ---------- */
 const READER={r:null,t:null};
 $('#rraw').innerHTML=svg(I.code);$('#rcopy').innerHTML=svg(I.copy);$('#rclose').innerHTML=svg(I.close);
 function openReader(r,t){READER.r=r;READER.t=t;$('#reader').hidden=false;document.documentElement.classList.add('lock');renderReader(true);$('#rdoc').focus()}
@@ -3265,7 +3268,7 @@ document.addEventListener('keydown',e=>{if($('#reader').hidden)return;
   if(e.key==='Escape')closeReader();else if(e.key==='ArrowRight')readerStep(1);else if(e.key==='ArrowLeft')readerStep(-1)});
 document.addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeReader();show(a.dataset.go)}});
 
-/* ---------- 历史 ---------- */
+/* ---------- History ---------- */
 async function loadHistory(){
   const d=await api(`/api/history?q=${encodeURIComponent($('#hq').value)}&tag=${encodeURIComponent($('#htag').value)}`);
   $('#hlist').innerHTML=d.runs.map(r=>`<li class="hitem"><div class="hmain"><div class="hq">${esc(r.prompt)}</div>
@@ -3279,7 +3282,7 @@ $('#hlist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;co
   else if(confirm(T('h.confirm'))){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
 let hqT;$('#hq').oninput=()=>{clearTimeout(hqT);hqT=setTimeout(loadHistory,250)};$('#htag').onchange=loadHistory;
 
-/* ---------- 统计 ---------- */
+/* ---------- Stats ---------- */
 async function loadStats(){
   const d=await api(`/api/stats?tag=${encodeURIComponent($('#stag').value)}&by=${$('#sby').value}`);
   $('#stotal').textContent=T('s.total',d.total.n||0,d.total.judged||0);
@@ -3301,7 +3304,7 @@ function renderJudgeStats(d){
     <td>${r.avg!=null?r.avg.toFixed(2)+`<span class="meter"><i style="width:${r.avg/5*100}%"></i></span>`:'—'}</td><td>${r.n}</td><td>${r.best||0}</td></tr>`).join('')}</table>`;
 }
 
-/* ---------- 环境 ---------- */
+/* ---------- Setup ---------- */
 let jobT=0;
 async function loadEnv(){
   $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
@@ -3329,7 +3332,7 @@ $('#etable').onclick=async e=>{const b=e.target.closest('button');if(!b)return;c
   else{await post('/api/login/'+t);flash(b,T('e.opened'))}}catch(err){toast(err);loadEnv()}};
 $('#recheck').onclick=loadEnv;
 
-/* ---------- 导航与启动 ---------- */
+/* ---------- Navigation and startup ---------- */
 function show(v){$$('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   for(const x of ['compare','history','stats','env'])$('#v-'+x).hidden=x!==v;
   if(v==='history')loadHistory();if(v==='stats')loadStats();if(v==='env')loadEnv()}
