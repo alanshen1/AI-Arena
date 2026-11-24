@@ -642,6 +642,39 @@ def desktop_sync(rid, lang="en", tool=None):
         print(note.strip(), flush=True)
 
 
+def run_in_tty(cmd, cwd, env, timeout=60):
+    """Run a command with stdin, stdout and stderr on a pseudo-terminal, as if typed in Terminal
+    (claude --desktop refuses to run when its output is redirected). Return (exit code or None, output)."""
+    import pty, select
+    master, slave = pty.openpty()
+    try:
+        p = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave, cwd=cwd, env=env, start_new_session=True)
+    finally:
+        os.close(slave)
+    out, end = [], time.time() + timeout
+    while True:
+        r, _, _ = select.select([master], [], [], 0.5)
+        if r:
+            try:
+                b = os.read(master, 4096)
+            except OSError:  # EIO once the child has exited
+                b = b""
+            if not b:
+                break
+            out.append(b.decode("utf-8", "replace"))
+        elif p.poll() is not None:
+            break
+        if time.time() > end:
+            p.kill()
+            break
+    os.close(master)
+    try:
+        rc = p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        rc = None
+    return rc, ANSI_RE.sub("", "".join(out)).replace("\r", "").strip()
+
+
 def continue_session(rid, tool, action, lang="en"):
     """Continue a round's session outside Arena. action: app (desktop app), terminal, or command (text to copy).
     Returns (ok, message, command)."""
@@ -679,14 +712,11 @@ def continue_session(rid, tool, action, lang="en"):
         env = child_env()
         for k in spec.get("strip_env") or []:
             env.pop(k, None)
-        try:
-            r = subprocess.run([path] + sub(spec["continue_desktop"]), cwd=folder if Path(folder).is_dir() else None,
-                               env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
+        rc, out = run_in_tty([path] + sub(spec["continue_desktop"]), folder if Path(folder).is_dir() else None, env)
+        if rc is None:
             return False, M(lang, "continue_fail", app=app, out="timeout"), command
-        out = ANSI_RE.sub("", (r.stdout or "") + (r.stderr or "")).strip()
-        if r.returncode:
-            key = "continue_old" if re.search(r"unknown option|desktop", out, re.I) and "--desktop" in out else "continue_fail"
+        if rc:
+            key = "continue_old" if re.search(r"unknown option", out, re.I) else "continue_fail"
             return False, M(lang, key, app=app, out=out[-400:]), command
         return True, M(lang, "continue_url", app=app), command
     return False, M(lang, "continue_none", label=label), command
