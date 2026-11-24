@@ -618,13 +618,15 @@ def set_setting(key, value):
 SYNC_LOCK = threading.Lock()
 
 
-def desktop_sync(rid, lang="en"):
+def desktop_sync(rid, lang="en", tool=None):
     """Setting "Add new conversations to Claude Desktop": move each new session of a tool that can open in its
     desktop app (claude --desktop --resume) once, so it shows in that app's sidebar under the workspace folder."""
     if not get_setting("desktop_sync", False):
         return
     tools = load_cfg()["tools"]
     for o in q("SELECT tool, status, session FROM outputs WHERE run_id=?", (rid,)):
+        if tool and o["tool"] != tool:
+            continue
         spec = tools.get(o["tool"]) or {}
         if o["status"] != "ok" or not o["session"] or not spec.get("continue_desktop"):
             continue
@@ -1518,6 +1520,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort, sess[0]))
     run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
+    if status == "ok" and sess[0] and spec.get("continue_desktop"):  # add to Claude Desktop as soon as this tool is done
+        threading.Thread(target=desktop_sync, args=(run.id, lang, name), daemon=True).start()
     with run.cond:
         run.pending.discard(name)
         if not run.pending:
@@ -1525,8 +1529,6 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             run.events.append({"type": "end"})
             if run.judge and not run.cancelled:  # automatic scoring
                 threading.Thread(target=start_judge, args=(run.id, run.judge_model, run.lang), daemon=True).start()
-            if not run.cancelled:  # add new Claude sessions to Claude Desktop, if turned on
-                threading.Thread(target=desktop_sync, args=(run.id, run.lang), daemon=True).start()
         run.cond.notify_all()
 
 
