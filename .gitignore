@@ -1,4 +1,4 @@
-# 运行时生成的本地数据（不提交）
+# Local runtime data (not committed)
 arena.db
 arena.db-*
 arena.log

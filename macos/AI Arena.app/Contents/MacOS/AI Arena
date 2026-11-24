@@ -1,36 +1,53 @@
 #!/bin/bash
-# AI Arena 启动器：服务已在运行就直接打开浏览器；否则后台启动 arena.py 再打开。
+# AI Arena launcher: if the server is already running, just open the browser;
+# otherwise start arena.py in the background, then open it.
 PORT="${ARENA_PORT:-8765}"; URL="http://127.0.0.1:$PORT/"
 
-alert() { /usr/bin/osascript -e "display dialog \"$1\" with title \"AI Arena\" buttons {\"好\"} default button 1 with icon caution" >/dev/null 2>&1; }
+# Messages follow the macOS language: Chinese if the first preferred language is Chinese, otherwise English.
+case "$(/usr/bin/defaults read -g AppleLanguages 2>/dev/null | sed -n '2p' | tr -d ' ",')" in
+  zh*) ZH=1 ;;
+  *)   ZH=0 ;;
+esac
+msg() { if [ "$ZH" = 1 ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
 
-# Finder 启动的 App 只有极简 PATH，这里读取登录 shell 的 PATH，才能找到 claude / codex / gemini
+alert() {
+  /usr/bin/osascript -e "display dialog \"$1\" with title \"AI Arena\" buttons {\"$(msg '好' 'OK')\"} default button 1 with icon caution" >/dev/null 2>&1
+}
+
+# An app started from Finder gets a minimal PATH. Read the login shell's PATH so claude / codex / agy can be found.
 LOGIN_PATH="$("${SHELL:-/bin/zsh}" -ilc 'echo "__P__$PATH"' 2>/dev/null </dev/null | grep '^__P__' | tail -1 | sed 's/^__P__//')"
 export PATH="$LOGIN_PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:$HOME/.volta/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# arena.py 所在目录：App 旁边 → 上一级（仓库里 App 在 macos/ 下）→ ~/Downloads/3tools
+# Where arena.py lives: next to the app -> one level up (in the repo the app is under macos/) -> ~/Downloads/3tools
 APP_PARENT="$(cd "$(dirname "$0")/../../.." && pwd)"
 DIR="$HOME/Downloads/3tools"
 for d in "$APP_PARENT" "$(dirname "$APP_PARENT")"; do
   if [ -f "$d/arena.py" ]; then DIR="$d"; break; fi
 done
-[ -f "$DIR/arena.py" ] || { alert "找不到 arena.py。\n请把 AI Arena.app 放在 arena.py 所在文件夹（或其 macos/ 子文件夹），或放在 ~/Downloads/3tools。"; exit 1; }
+[ -f "$DIR/arena.py" ] || {
+  alert "$(msg '找不到 arena.py。\n请把 AI Arena.app 放在 arena.py 所在文件夹（或其 macos/ 子文件夹），或放在 ~/Downloads/3tools。' \
+               'arena.py not found.\nPut AI Arena.app in the folder that contains arena.py (or its macos/ subfolder), or in ~/Downloads/3tools.')"
+  exit 1
+}
 
 alive() { /usr/bin/curl -s -o /dev/null --max-time 1 "$URL"; }
 if alive; then /usr/bin/open "$URL"; exit 0; fi
 
 PY="$(command -v python3)"
 if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then
-  alert "没有找到 Python 3.8+。\n请先安装：brew install python，或在终端运行 xcode-select --install。"; exit 1
+  alert "$(msg '没有找到 Python 3.8+。\n请先安装：brew install python，或在终端运行 xcode-select --install。' \
+               'Python 3.8+ not found.\nInstall it with brew install python, or run xcode-select --install in Terminal.')"
+  exit 1
 fi
 
 cd "$DIR" || exit 1
-echo "=== $(date '+%F %T') 启动 ===" >> arena.log
+echo "=== $(date '+%F %T') start ===" >> arena.log
 nohup "$PY" arena.py --no-open --idle-exit >> arena.log 2>&1 &
 
+# Wait up to 15 seconds for the server to answer.
 for _ in $(seq 1 60); do
   sleep 0.25
   if alive; then /usr/bin/open "$URL"; exit 0; fi
 done
-alert "启动失败，日志：\n$(tail -5 arena.log | sed 's/"/'"'"'/g')"
+alert "$(msg '启动失败，日志：' 'AI Arena failed to start. Log:')\n$(tail -5 arena.log | sed 's/"/'"'"'/g')"
 exit 1
