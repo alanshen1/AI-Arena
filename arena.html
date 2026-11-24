@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Arena</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cdefs%3E%3ClinearGradient id=%22ag%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234C8DFF%22/%3E%3Cstop offset=%22.55%22 stop-color=%22%236D6AF7%22/%3E%3Cstop offset=%221%22 stop-color=%22%23A47CF2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2232%22 height=%2232%22 rx=%229%22 fill=%22url%28%23ag%29%22/%3E%3Crect x=%228%22 y=%2210%22 width=%224%22 height=%2214%22 rx=%222%22 fill=%22%23fff%22/%3E%3Crect x=%2214%22 y=%2215%22 width=%224%22 height=%229%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.88%22/%3E%3Crect x=%2220%22 y=%2212.5%22 width=%224%22 height=%2211.5%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.76%22/%3E%3Ccircle cx=%2224.6%22 cy=%227.4%22 r=%221.7%22 fill=%22%23fff%22/%3E%3C/svg%3E">
@@ -353,88 +353,88 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 <header class="top"><div class="wrap">
   <div class="brand"><span class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="ag2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4C8DFF"/><stop offset=".55" stop-color="#6D6AF7"/><stop offset="1" stop-color="#A47CF2"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#ag2)"/><rect x="8" y="10" width="4" height="14" rx="2" fill="#fff"/><rect x="14" y="15" width="4" height="9" rx="2" fill="#fff" fill-opacity=".88"/><rect x="20" y="12.5" width="4" height="11.5" rx="2" fill="#fff" fill-opacity=".76"/><circle cx="24.6" cy="7.4" r="1.7" fill="#fff"/></svg></span><span class="word">AI Arena</span></div>
   <nav>
-    <button data-v="compare" class="on" data-i18n="nav.compare">对比</button><button data-v="history" data-i18n="nav.history">历史</button>
-    <button data-v="stats" data-i18n="nav.stats">统计</button><button data-v="env" data-i18n="nav.env">环境</button>
+    <button data-v="compare" class="on" data-i18n="nav.compare">Compare</button><button data-v="history" data-i18n="nav.history">History</button>
+    <button data-v="stats" data-i18n="nav.stats">Stats</button><button data-v="env" data-i18n="nav.env">Setup</button>
   </nav>
-  <span class="sp"></span><span id="conn" hidden data-i18n="conn">后台服务未连接，请重新打开 AI Arena</span>
-  <button class="btn sm ghost" id="ppBtn" aria-controls="pp" aria-expanded="false"><span class="ppico"></span><span data-i18n="pp.btn">Prompt 库</span></button>
-  <div class="langsw" role="group" aria-label="Language / 语言"><button data-l="zh" lang="zh-CN">中文</button><button data-l="en" lang="en">EN</button></div>
-  <button class="btn sm ghost" id="quit" title="关闭后台服务" data-i18n="quit" data-i18n-title="quit.title">退出</button>
+  <span class="sp"></span><span id="conn" hidden data-i18n="conn">The background service is not running. Reopen AI Arena.</span>
+  <button class="btn sm ghost" id="ppBtn" aria-controls="pp" aria-expanded="false"><span class="ppico"></span><span data-i18n="pp.btn">Prompts</span></button>
+  <div class="langsw" role="group" aria-label="Language"></div>
+  <button class="btn sm ghost" id="quit" title="Stop the background service" data-i18n="quit" data-i18n-title="quit.title">Quit</button>
 </div></header>
 
 <main class="wrap">
 <section id="v-compare">
   <div class="composer">
     <div class="cin">
-      <textarea id="prompt" rows="1" placeholder="问一个问题，选中的模型会同时作答" data-i18n-ph="prompt.ph"></textarea>
-      <button class="ib attbtn" id="attBtn" type="button" data-i18n-title="att.title" data-i18n-aria="att.btn"></button>
+      <textarea id="prompt" rows="1" placeholder="Ask a question and the selected models answer side by side" data-i18n-ph="prompt.ph"></textarea>
+      <button class="ib attbtn" id="attBtn" type="button" data-i18n-title="Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them." data-i18n-aria="att.btn"></button>
       <input type="file" id="attInput" multiple hidden>
-      <button class="btn primary" id="go" data-i18n="send">发送</button>
+      <button class="btn primary" id="go" data-i18n="send">Send</button>
     </div>
     <div class="atts" id="atts"></div>
     <div class="lanes" id="lanes"></div>
     <div class="copts">
-      <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
-      <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
-      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">聊天模式</span></label>
+      <input class="field" id="tag" placeholder="Tag, e.g. writing" list="tagList" aria-label="Tag" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
+      <input class="field" id="cwd" placeholder="Working folder (optional)" aria-label="Working folder" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
+      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">Chat mode</span></label>
       <span class="judgeopt" id="judgeOpt" hidden></span>
-      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">发送</span></span>
+      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">to send</span></span>
     </div>
   </div>
-  <div class="feedhead"><h2 data-i18n="recent">最近的对比</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll" data-i18n="collapseAll">全部折叠</button></div>
+  <div class="feedhead"><h2 data-i18n="recent">Recent comparisons</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll" data-i18n="collapseAll">Collapse all</button></div>
   <div id="feed"></div>
-  <p id="empty" hidden data-i18n="empty">还没有对比记录。在上面输入一个问题，选中的模型会同时作答。</p>
+  <p id="empty" hidden data-i18n="empty">No comparisons yet. Ask a question above and the selected models will answer side by side.</p>
 </section>
 
 <section id="v-history" class="page" hidden>
-  <div class="bar"><input class="field" id="hq" placeholder="搜索问题" style="flex:1" data-i18n-ph="hq.ph" data-i18n-aria="hq.ph"><select class="field" id="htag"></select></div>
+  <div class="bar"><input class="field" id="hq" placeholder="Search questions" style="flex:1" data-i18n-ph="hq.ph" data-i18n-aria="hq.ph"><select class="field" id="htag"></select></div>
   <ul class="list" id="hlist"></ul>
 </section>
 
 <section id="v-stats" class="page" hidden>
   <div class="bar"><select class="field" id="stag"></select>
-    <select class="field" id="sby"><option value="" data-i18n="sby.tool">按工具</option><option value="model" data-i18n="sby.model">按工具、模型和 effort</option></select>
+    <select class="field" id="sby"><option value="" data-i18n="sby.tool">By tool</option><option value="model" data-i18n="sby.model">By tool, model and effort</option></select>
     <span id="stotal" class="note-s" style="margin:0"></span></div>
   <table class="grid" id="stable"></table>
   <div id="sjudge"></div>
-  <p class="note-s" data-i18n="stats.note">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
+  <p class="note-s" data-i18n="stats.note">Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.</p>
 </section>
 
 <section id="v-env" class="page" hidden>
-  <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
+  <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">Check again</button><span id="envNode" class="note-s" style="margin:0"></span></div>
   <div class="bar" id="openaiPreference" hidden>
-    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">显示 OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列</span>
+    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
   </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
-  <details class="note-s"><summary data-i18n="env.path">搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
-  <p class="note-s" data-i18n="env.note">没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。</p>
+  <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
+  <p class="note-s" data-i18n="env.note">For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.</p>
 </section>
 </main>
 
 <aside id="pp" aria-labelledby="ppTitle" inert>
-  <div class="pph"><h2 id="ppTitle" data-i18n="pp.title">Prompt 库</h2><span class="ppn" id="ppN"></span><span class="sp"></span>
-    <button class="btn sm" id="ppNew" data-i18n="pp.new">新建</button><button class="ib" id="ppClose" data-i18n-title="pp.close" data-i18n-aria="pp.close"></button></div>
+  <div class="pph"><h2 id="ppTitle" data-i18n="pp.title">Prompts</h2><span class="ppn" id="ppN"></span><span class="sp"></span>
+    <button class="btn sm" id="ppNew" data-i18n="pp.new">New</button><button class="ib" id="ppClose" data-i18n-title="Close" data-i18n-aria="pp.close"></button></div>
   <div class="ppbar"><input class="field" type="search" id="ppQ" data-i18n-ph="pp.search" data-i18n-aria="pp.search">
-    <button class="btn sm ghost" id="ppSaveCur" data-i18n="pp.saveCur" data-i18n-title="pp.saveCur.title"></button></div>
+    <button class="btn sm ghost" id="ppSaveCur" data-i18n="pp.saveCur" data-i18n-title="Save what is in the question box as a prompt"></button></div>
   <div class="ppcats" id="ppCats" role="group" data-i18n-aria="pp.cats"></div>
   <div class="pplist" id="ppList"></div>
   <form class="ppform" id="ppForm" hidden>
-    <label><span data-i18n="pp.f.title">标题</span><input class="field" id="ppfTitle" maxlength="200" data-i18n-ph="pp.f.titlePh"></label>
-    <label><span data-i18n="pp.f.cat">分类</span><input class="field" id="ppfCat" maxlength="40" list="ppCatList" data-i18n-ph="pp.f.catPh"><datalist id="ppCatList"></datalist></label>
-    <label class="grow"><span data-i18n="pp.f.body">内容</span><textarea class="field" id="ppfBody" rows="10" required></textarea></label>
-    <p class="pphint" data-i18n="pp.f.hint">把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。</p>
-    <div class="ppfa"><button type="button" class="btn sm ghost" id="ppfCancel" data-i18n="cancel">取消</button><button type="submit" class="btn sm primary" data-i18n="pp.f.save">保存</button></div>
+    <label><span data-i18n="pp.f.title">Title</span><input class="field" id="ppfTitle" maxlength="200" data-i18n-ph="pp.f.titlePh"></label>
+    <label><span data-i18n="pp.f.cat">Category</span><input class="field" id="ppfCat" maxlength="40" list="ppCatList" data-i18n-ph="pp.f.catPh"><datalist id="ppCatList"></datalist></label>
+    <label class="grow"><span data-i18n="pp.f.body">Text</span><textarea class="field" id="ppfBody" rows="10" required></textarea></label>
+    <p class="pphint" data-i18n="pp.f.hint">Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.</p>
+    <div class="ppfa"><button type="button" class="btn sm ghost" id="ppfCancel" data-i18n="cancel">Cancel</button><button type="submit" class="btn sm primary" data-i18n="pp.f.save">Save</button></div>
   </form>
-  <p class="pphint pphelp" data-i18n="pp.help">点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。</p>
-  <div class="ppfoot"><button type="button" id="ppRestore" data-i18n="pp.restore" data-i18n-title="pp.restore.title">恢复内置 prompt</button></div>
+  <p class="pphint pphelp" data-i18n="pp.help">Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.</p>
+  <div class="ppfoot"><button type="button" id="ppRestore" data-i18n="pp.restore" data-i18n-title="Add back any built-in prompts you deleted; your own prompts are not affected">Restore built-in prompts</button></div>
 </aside>
 
-<div id="reader" hidden role="dialog" aria-modal="true" aria-label="阅读模式" data-i18n-aria="reader">
+<div id="reader" hidden role="dialog" aria-modal="true" aria-label="Reader" data-i18n-aria="reader">
   <div class="rp">
     <div class="rph"><div id="rtabs" style="display:flex;gap:2px;flex-wrap:wrap"></div><span class="sp"></span>
-      <span class="rhint" data-i18n="reader.hint">← → 切换  Esc 关闭</span>
-      <button class="ib" id="rraw" title="原文 / 排版" data-i18n-title="raw"></button><button class="ib" id="rcopy" title="复制回答" data-i18n-title="copyAns"></button><button class="ib" id="rclose" title="关闭" data-i18n-title="close"></button></div>
+      <span class="rhint" data-i18n="reader.hint">← → switch   Esc close</span>
+      <button class="ib" id="rraw" title="Raw / formatted" data-i18n-title="raw"></button><button class="ib" id="rcopy" title="Copy answer" data-i18n-title="copyAns"></button><button class="ib" id="rclose" title="Close" data-i18n-title="close"></button></div>
     <div id="rq"></div>
     <div id="rdoc" tabindex="0"></div>
   </div>
@@ -458,115 +458,27 @@ const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6
   pen:'<path d="m10.8 2.7 2.5 2.5-7.6 7.6H3.2v-2.5z"/>',trash:'<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- Language ---------- */
-const I18N={zh:{
- 'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
- 'cancel':'取消','pp.btn':'Prompt 库','pp.title':'Prompt 库','pp.new':'新建','pp.close':'收起','pp.search':'搜索标题或内容','pp.saveCur':'存当前输入',
- 'pp.saveCur.title':'把输入框里的内容存成一条 prompt','pp.cats':'分类','pp.all':'全部','pp.insert':'插入到输入框','pp.pinned':'已置顶',
- 'pp.pin':'置顶','pp.unpin':'取消置顶','pp.edit':'编辑','pp.del':'删除','pp.sure':'确认删除','pp.empty':'还没有 prompt。点「新建」，或者把写好的问题用「存当前输入」存下来。',
- 'pp.noMatch':'没有匹配的 prompt','pp.nothing':'输入框是空的','pp.saved':'已保存','pp.f.title':'标题','pp.f.titlePh':'不填就用第一行','pp.f.cat':'分类',
- 'pp.f.catPh':'例如：编程、学习','pp.f.body':'内容','pp.f.save':'保存','pp.f.hint':'把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。',
- 'pp.help':'点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。',
- 'pp.restore':'恢复内置 prompt','pp.restore.title':'把删掉的内置 prompt 加回来，不影响你自己的 prompt','pp.restored':'已恢复 {0} 条内置 prompt','pp.restoredNone':'内置 prompt 都在，没有需要恢复的',
- 'quit':'退出','quit.title':'关闭后台服务','prompt.ph':'问一个问题，选中的模型会同时作答','send':'发送','toSend':'发送',
- 'tag':'标签','tag.ph':'标签，如 写作','cwd':'工作目录','cwd.ph':'工作目录（可选）','recent':'最近的对比','collapseAll':'全部折叠',
- 'empty':'还没有对比记录。在上面输入一个问题，选中的模型会同时作答。','hq.ph':'搜索问题','sby.tool':'按工具','sby.model':'按工具、模型和 effort',
- 'stats.note':'胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。',
- 'recheck':'重新检测','env.path':'搜索过的 PATH','env.note':'没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。',
- 'reader':'阅读模式','reader.hint':'← → 切换  Esc 关闭','raw':'原文 / 排版','copyAns':'复制回答','close':'关闭',
- 'err.offline':'连不上后台服务，请重新打开 AI Arena','err.req':'请求失败 {0}','copyFail':'复制失败','default':'默认',
- 'lane.on':'参加这轮对比','lane.modelAria':'{0} 使用的模型','lane.model':'模型','lane.noModel':'这个工具没有配置模型参数','lane.custom':'自定义模型 ID…',
- 'lane.effAria':'{0} 的 effort','lane.effTitle':'Effort：模型思考的投入程度。越高越深入，也越慢、越耗额度','lane.effDefault':'Effort 默认',
- 'lane.customPrompt':'输入 {0} 的模型 ID（会作为模型参数传给它的命令行）',
- 'st.queued':'排队中','st.run':'生成中','st.ok':'完成','st.err':'出错 {0}',
- 'tie':'平手','bestOf':'最佳 {0}','stop':'停止','rerun':'重跑','rerun.title':'把首个问题作为新对话再问一次',
- 'fq.ph':'接着追问，各工具会沿用自己的上下文回答','fq':'追问','fgo':'追问','fhint':'沿用上一轮的工具、模型和 effort。',
- 'peers.label':'附上其他模型的回答','peers.title':'把上一轮其他模型的回答（标明模型）一起发给每个工具，方便让它们对比、点评或综合。想让各工具独立作答时关掉。','peers.chip':'看过其他回答',
- 'rounds':'{0} 轮','roundN':'第 {0} 轮','loading':'正在载入…','allFull':'全部展开全文','allFold':'全部收起',
- 'more':'展开全文','less':'收起','stars':'{0} 星','note.ph':'写点备注','note.aria':'{0} 的备注','best':'最佳','log':'过程日志','logEmpty':'（暂无）',
- 'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
- 'copy':'复制','copied':'已复制','m.actual':'实际使用：{0}','m.chosen':'（选择的是 {0}）','m.model':'模型：{0}','m.effort':'Effort：{0}','cost':'　约 ${0}',
- 'j.autoTitle':'每轮回答完成后，自动把回答匿名交给 {0} 评分','j.auto':'{0} 自动评分','j.modelAria':'评分使用的模型',
- 'j.ask':'让 {0} 评分、找分歧',
- 'd.title':'分歧与共识','d.nConf':'{0} 处分歧','d.nFact':'（{0} 处事实冲突）','d.noConf':'没有实质分歧','d.nCons':'{0} 条共识','d.nConf1':'1 处分歧','d.nCons1':'1 条共识','d.dot':' · ',
- 'd.k.fact':'事实冲突','d.k.advice':'建议不同','d.k.emphasis':'侧重不同','d.na':'未提及','d.verdict':'{0} 的判断：','d.cons':'几家都同意','j.busy':'{0} 评分中…','j.elapsed':'已 {0} 秒','j.last':'最新输出：{0}','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
- 'j.fail':'评分失败：{0}','j.unknown':'未知原因','j.none':'未选出','j.agree':'和你的选择一致','j.best':'{0} 认为最佳：','j.sep':'。',
- 'k.accuracy':'准确','k.completeness':'完整','k.clarity':'清晰','k.usefulness':'实用',
- 't.busy':'上一轮还在生成，等它结束再追问','t.pickTool':'至少选中一个工具',
- 'h.unrated':'未评分','h.open':'打开','h.del':'删除','h.none':'没有找到记录','h.confirm':'删除这条对话（包括所有追问）？',
- 's.total':'共 {0} 轮，已评判 {1} 轮','s.tool':'工具','s.n':'参加','s.ok':'成功率','s.avg':'平均分','s.rated':'打分数','s.best':'最佳','s.win':'胜率','s.secs':'平均耗时','s.chars':'平均字数','s.none':'还没有数据',
- 'sj.title':'{0} 评分','sj.empty':'还没有 {0} 的评分。在输入区勾选「{0} 自动评分」，或在任意一轮下面点「让 {0} 评分」。',
- 'sj.agree':'你和 {0} 选的最佳一致：{1} / {2}（{3}%）','sj.agreeEmpty':'你和它都选过最佳的轮次越多，一致率越有参考价值',
- 'sj.avg':'{0} 平均分','sj.n':'评过的回答','sj.best':'{0} 选为最佳',
- 'e.checking':'正在检测，需要几秒…','e.node':'Node {0}。','e.noNode':'没检测到 Node.js。','e.where':'一键安装会装到 ~/.ai-arena，不需要管理员权限。',
- 'e.tool':'工具','e.status':'状态','e.ver':'版本','e.path':'位置','e.act':'操作','e.login':'登录','e.installing':'安装中…','e.install':'一键安装','e.judge':'评分',
- 'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
- 'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
- 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。',
- 'att.btn':'添加附件','att.title':'添加附件：Word、Excel、PowerPoint、PDF、文本、图片等。也可以把文件拖进来，或直接粘贴。',
- 'att.uploading':'上传中','att.chars':'已提取 {0} 字','att.image':'图片，工具可直接查看','att.noText':'没提取到文字，工具可打开原文件',
- 'att.fail':'上传失败','att.remove':'移除','att.pending':'附件还在上传，请稍等','att.tooBig':'{0} 超过 50 MB，无法添加','att.open':'打开原文件','att.count':'{0} 个附件',
- 'chat.label':'聊天模式','chat.title':'适合日常问答。所有工具收到同样的要求：像通用助手那样完整作答，方案类问题给出推荐和可以照着做的例子。追问沿用此设置。','e.showOpenai':'显示 OpenAI GPT','e.openaiNoKey':'需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列','t.enableOpenai':'请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。','lane.apiKey':'需要 API Key','lane.apiSetup':'设置 ARENA_OPENAI_API_KEY 后重启。选用此线路时使用独立 API 额度。','chat.chip':'聊天模式'
-},en:{
- 'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
- 'cancel':'Cancel','pp.btn':'Prompts','pp.title':'Prompts','pp.new':'New','pp.close':'Close','pp.search':'Search titles and text','pp.saveCur':'Save input',
- 'pp.saveCur.title':'Save what is in the question box as a prompt','pp.cats':'Categories','pp.all':'All','pp.insert':'Insert into the question box','pp.pinned':'Pinned',
- 'pp.pin':'Pin','pp.unpin':'Unpin','pp.edit':'Edit','pp.del':'Delete','pp.sure':'Delete?','pp.empty':'No prompts yet. Click New, or write a question and click Save input.',
- 'pp.noMatch':'No matching prompts','pp.nothing':'The question box is empty','pp.saved':'Saved','pp.f.title':'Title','pp.f.titlePh':'Leave empty to use the first line','pp.f.cat':'Category',
- 'pp.f.catPh':'For example: Coding, Learning','pp.f.body':'Text','pp.f.save':'Save','pp.f.hint':'Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.',
- 'pp.help':'Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.',
- 'pp.restore':'Restore built-in prompts','pp.restore.title':'Add back any built-in prompts you deleted; your own prompts are not affected','pp.restored':'Restored {0} built-in prompts','pp.restoredNone':'All built-in prompts are already here',
- 'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
- 'tag':'Tag','tag.ph':'Tag, e.g. writing','cwd':'Working folder','cwd.ph':'Working folder (optional)','recent':'Recent comparisons','collapseAll':'Collapse all',
- 'empty':'No comparisons yet. Ask a question above and the selected models will answer side by side.','hq.ph':'Search questions','sby.tool':'By tool','sby.model':'By tool, model and effort',
- 'stats.note':'Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.',
- 'recheck':'Check again','env.path':'Searched PATH','env.note':'For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.',
- 'reader':'Reader','reader.hint':'← → switch   Esc close','raw':'Raw / formatted','copyAns':'Copy answer','close':'Close',
- 'err.offline':'Cannot reach the background service. Reopen AI Arena.','err.req':'Request failed {0}','copyFail':'Copy failed','default':'Default',
- 'lane.on':'Include in this round','lane.modelAria':'{0} model','lane.model':'Model','lane.noModel':'This tool has no model option configured','lane.custom':'Custom model ID…',
- 'lane.effAria':'{0} effort','lane.effTitle':'Effort: how hard the model thinks. Higher goes deeper but is slower and uses more quota','lane.effDefault':'Effort default',
- 'lane.customPrompt':'Enter a model ID for {0} (passed to its CLI as the model option)',
- 'st.queued':'Queued','st.run':'Generating','st.ok':'Done','st.err':'Error {0}',
- 'tie':'Tie','bestOf':'Best: {0}','stop':'Stop','rerun':'Rerun','rerun.title':'Ask the first question again as a new conversation',
- 'fq.ph':'Ask a follow-up. Each tool continues its own conversation','fq':'Follow-up','fgo':'Follow up','fhint':'Uses the same tools, models and effort as the last round.',
- 'peers.label':'Include the other answers','peers.title':"Send each tool the other models' answers from the previous round, labeled by model, so it can compare, critique or combine them. Turn off to keep answers independent.",'peers.chip':'Saw other answers',
- 'rounds':'{0} rounds','roundN':'Round {0}','loading':'Loading…','allFull':'Expand all','allFold':'Collapse all',
- 'more':'Show full answer','less':'Show less','stars':'{0} stars','note.ph':'Add a note','note.aria':'Note for {0}','best':'Best','log':'Process log','logEmpty':'(empty)',
- 'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
- 'copy':'Copy','copied':'Copied','m.actual':'Actual model: {0}','m.chosen':' (selected: {0})','m.model':'Model: {0}','m.effort':'Effort: {0}','cost':'   ≈ ${0}',
- 'j.autoTitle':'After each round, send the answers anonymously to {0} for scoring','j.auto':'{0} auto-score','j.modelAria':'Scoring model',
- 'j.ask':'Ask {0} to score and compare',
- 'd.title':'Disagreements and agreement','d.nConf':'{0} disagreements','d.nFact':' ({0} factual)','d.noConf':'No real disagreements','d.nCons':'{0} shared points','d.nConf1':'1 disagreement','d.nCons1':'1 shared point','d.dot':' · ',
- 'd.k.fact':'Facts differ','d.k.advice':'Advice differs','d.k.emphasis':'Emphasis differs','d.na':'Not mentioned','d.verdict':'{0}: ','d.cons':'All answers agree','j.busy':'{0} is scoring…','j.elapsed':'{0}s so far','j.last':'Latest output: {0}','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
- 'j.fail':'Scoring failed: {0}','j.unknown':'unknown reason','j.none':'none','j.agree':'matches your pick','j.best':'{0} picks as best: ','j.sep':'. ',
- 'k.accuracy':'Accuracy','k.completeness':'Completeness','k.clarity':'Clarity','k.usefulness':'Usefulness',
- 't.busy':'The last round is still running. Wait for it to finish before following up.','t.pickTool':'Select at least one tool',
- 'h.unrated':'Not rated','h.open':'Open','h.del':'Delete','h.none':'No matching conversations','h.confirm':'Delete this conversation, including all follow-ups?',
- 's.total':'{0} rounds, {1} judged','s.tool':'Tool','s.n':'Rounds','s.ok':'Success','s.avg':'Avg score','s.rated':'Rated','s.best':'Best','s.win':'Win rate','s.secs':'Avg time','s.chars':'Avg length','s.none':'No data yet',
- 'sj.title':'{0} scores','sj.empty':'No {0} scores yet. Turn on "{0} auto-score" in the composer, or click "Ask {0} to score" under any round.',
- 'sj.agree':'Your pick matched {0}: {1} / {2} ({3}%)','sj.agreeEmpty':'The more rounds you both pick a best for, the more meaningful the match rate',
- 'sj.avg':'{0} avg score','sj.n':'Answers scored','sj.best':'Picked best by {0}',
- 'e.checking':'Checking, this takes a few seconds…','e.node':'Node {0}. ','e.noNode':'Node.js not found. ','e.where':'Install puts tools in ~/.ai-arena and needs no admin rights.',
- 'e.tool':'Tool','e.status':'Status','e.ver':'Version','e.path':'Location','e.act':'Action','e.login':'Sign in','e.installing':'Installing…','e.install':'Install','e.judge':'judge',
- 'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
- 'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
- 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.',
- 'att.btn':'Attach files','att.title':'Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.',
- 'att.uploading':'Uploading','att.chars':'{0} characters extracted','att.image':'Image; tools can open it','att.noText':'No text extracted; tools can open the file',
- 'att.fail':'Upload failed','att.remove':'Remove','att.pending':'Attachments are still uploading. Please wait.','att.tooBig':'{0} is larger than 50 MB and cannot be added','att.open':'Open the original file','att.count':'{0} attachments',
- 'chat.label':'Chat mode','chat.title':'For everyday questions. Every tool gets the same instructions: answer like a general-purpose assistant, and for plans give a recommendation and an example you can follow. Follow-ups keep this setting.','e.showOpenai':'Show OpenAI GPT','e.openaiNoKey':'Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare','t.enableOpenai':'Show OpenAI GPT in Environment, then select it in Compare.','lane.apiKey':'API key required','lane.apiSetup':'Set ARENA_OPENAI_API_KEY for Arena, then restart. This option uses separate API credits.','chat.chip':'Chat mode'
-}};
-const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
-let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
-const T=(k,...a)=>String((I18N[LANG]&&I18N[LANG][k])??I18N.zh[k]??k).replace(/\{(\d)\}/g,(m,i)=>a[+i]??'');
-const statusText=s=>LANG==='en'?(STATUS_EN[s]||s):s;
+const I18N=__I18N__, LANGS=__LANGS__;  // filled in by arena.py from locales/*.json
+const LANG_CODES=LANGS.map(l=>l.code);
+let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(LANG_CODES.includes(v))return v}catch(e){}
+  for(const n of navigator.languages||[navigator.language||'']){const c=LANG_CODES.find(c=>n.toLowerCase()===c||n.toLowerCase().startsWith(c+'-'));if(c)return c}
+  return LANG_CODES.includes('en')?'en':LANG_CODES[0]})();
+const META=LANGS.find(l=>l.code===LANG)||{};
+const TT=k=>I18N[LANG]?.[k]??I18N.en?.[k];  // raw lookup; undefined when no language has the key
+const T=(k,...a)=>String(TT(k)??k).replace(/\{(\d)\}/g,(m,i)=>a[+i]??'');
+const statusText=s=>TT('status.'+s)??s;
+const allLangs=k=>[...new Set(LANG_CODES.map(c=>I18N[c]?.[k]).filter(Boolean))];  // a key's text in every language
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 function applyI18n(){
-  document.documentElement.lang=LANG==='en'?'en':'zh-CN';
+  document.documentElement.lang=META.html_lang||LANG;
+  $('.langsw').setAttribute('aria-label',T('lang.aria'));
   $$('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));
   $$('[data-i18n-ph]').forEach(e=>e.placeholder=T(e.dataset.i18nPh));
   $$('[data-i18n-title]').forEach(e=>e.title=T(e.dataset.i18nTitle));
   $$('[data-i18n-aria]').forEach(e=>e.setAttribute('aria-label',T(e.dataset.i18nAria)));
   $$('.langsw button').forEach(b=>{b.classList.toggle('on',b.dataset.l===LANG);b.setAttribute('aria-pressed',b.dataset.l===LANG)});
 }
+$('.langsw').innerHTML=LANGS.map(l=>`<button data-l="${esc(l.code)}" lang="${esc(l.html_lang||l.code)}">${esc(l.name||l.code)}</button>`).join('');
 $$('.langsw button').forEach(b=>b.onclick=()=>{if(b.dataset.l===LANG)return;try{localStorage.setItem('arenaLang',b.dataset.l)}catch(e){}location.reload()});
 function md(t){t=clean(t);return (window.marked&&window.DOMPurify)?DOMPurify.sanitize(marked.parse(t)):'<pre class="rawtxt">'+esc(t)+'</pre>'}
 const ls={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
@@ -576,9 +488,9 @@ function api(path,opt={}){return fetch(path,{...opt,headers:{'Content-Type':'app
   .catch(()=>{offline(false);throw T('err.offline')})
   .then(async r=>{offline(true);const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||T('err.req',r.status);return j})}
 const post=(p,b={})=>api(p,{method:'POST',body:JSON.stringify(b)});
-function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),hm=d.toLocaleTimeString(LANG==='en'?'en-GB':'zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
+function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),loc=META.date_locale||LANG,hm=d.toLocaleTimeString(loc,{hour:'2-digit',minute:'2-digit',hour12:false});
   if(d.toDateString()===n.toDateString())return hm;
-  return LANG==='en'?`${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${hm}`:`${d.getMonth()+1}月${d.getDate()}日 ${hm}`}
+  return `${d.toLocaleDateString(loc,{month:'short',day:'numeric'})} ${hm}`}
 function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.textContent=t;setTimeout(()=>{b.innerHTML=o;delete b.dataset.f},1100)}
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
@@ -588,9 +500,9 @@ const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // hidden w
 const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
 const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
 const color=t=>CFG.tools[t]?.color||'#8893a3';
-const EFF_ZH={minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'很高',max:'最高'};
-const effLabel=e=>e?(LANG==='en'?e:`${e} ${EFF_ZH[e]||''}`.trim()):'';
-const dlabel=t=>{const v=CFG.tools[t]||{};return (LANG==='en'?v.default_label_en:v.default_label)||T('default')};
+const effName=e=>{const l=TT('eff.'+e);return l&&l!==e?l:''};  // localized effort name, e.g. for high; English shows the code itself
+const effLabel=e=>e?`${e} ${effName(e)}`.trim():'';
+const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 function renderLanes(){
   const tools=visibleTools();
@@ -603,7 +515,7 @@ function renderLanes(){
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
       ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
-        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(LANG==='en'?e:(EFF_ZH[e]||''))}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
+        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
   if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
@@ -694,7 +606,7 @@ function fillTurn(r,d){   // finished rounds use the stored results; only runnin
   const got=new Set();
   for(const o of d.outputs||[])if(r.S[o.tool]){got.add(o.tool);Object.assign(r.S[o.tool],{out:o.output||'',log:o.log||'',status:o.status,secs:o.seconds,
     actual:o.actual_model||'',model:o.model||r.S[o.tool].model,effort:o.effort||r.S[o.tool].effort});$('.ch b',r.S[o.tool].el).title=o.cmd||''}
-  for(const t of r.tools){if(!got.has(t))r.S[t].status='已中断';paint(r,t)}
+  for(const t of r.tools){if(!got.has(t))r.S[t].status='interrupted';paint(r,t)}
 }
 function fold(r,f){r.folded=f;r.el.classList.toggle('folded',f);$('.th2',r.el).setAttribute('aria-expanded',!f)}
 function foldOld(th){th.turns.forEach((r,i)=>fold(r,i<th.turns.length-1))}
@@ -728,7 +640,7 @@ function makeCol(r,t,parent){
 }
 function content(s){
   if(s.out)return s.raw?`<pre class="rawtxt">${esc(clean(s.out))}</pre>`:`<div class="md">${md(s.out)}</div>`;
-  if(s.status==='未安装')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
+  if(s.status==='not_installed')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
   if(s.status==='run')return `<p class="ph thinking">${T('c.thinking')}</p>`;
   if(s.status)return `<p class="ph">${T('c.noOut')}</p>`;
   return `<p class="ph">${T('st.queued')}</p>`;
@@ -924,7 +836,7 @@ function pollJudge(r,waitStart){
 }
 function deanon(t,map){  // map the anonymous labels in Grok's comments (Answer A, A vs C) back to tool names
   const nm=l=>map&&map[l]?tname(map[l]):null;
-  return String(t||'').replace(/(?:回答|Answer|Response)\s*([A-H])\b/g,(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
+  return String(t||'').replace(new RegExp(`(?:${[...allLangs('j.answerWord'),'Answer','Response'].map(reEsc).join('|')})\\s*([A-H])\\b`,'g'),(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
 }
 function renderJudge(r,j){
@@ -958,7 +870,7 @@ function renderConflicts(r,j){  // consensus and conflicts: each tool's position
   box.innerHTML=`<summary><span class="chev sm">${svg(I.chev)}</span>${esc(T('d.title'))}<span class="dsub">${esc(sub)}</span></summary>
   <div class="dbody">${conf.map(c=>`<div class="dc"><div class="dt"><span class="dk ${esc(c.kind)}">${esc(T('d.k.'+c.kind))}</span><span>${D(c.topic)}</span></div>
     <div class="dp" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))">${r.tools.map(t=>{const v=(c.positions||{})[t];
-      const nm=!v||/^(未提及|not mentioned)\.?$/i.test(v.trim());
+      const nm=!v||new RegExp(`^(${[...allLangs('d.na'),'not mentioned'].map(reEsc).join('|')})[.。]?$`,'i').test(v.trim());
       return `<div class="${nm?'nm':''}" style="--c:${esc(color(t))}"><b>${esc(tname(t))}</b>${v?D(v):esc(T('d.na'))}</div>`}).join('')}</div>
     ${c.verdict?`<div class="dv"><b>${esc(T('d.verdict',tname(CFG.judge||'grok')))}</b>${D(c.verdict)}</div>`:''}</div>`).join('')}
   ${cons.length?`<ul class="dcons"><b>${esc(T('d.cons'))}</b>${cons.map(x=>`<li>${D(x)}</li>`).join('')}</ul>`:''}</div>`;
@@ -1087,7 +999,7 @@ async function loadEnv(){
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
       <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
       <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
-    const hint=LANG==='en'?(t.hint_en||t.hint):t.hint;
+    const hint=t.hint||'';
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
     return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?`<small>${T('e.judge')}</small>`:''}</td>

@@ -3,15 +3,22 @@
 # otherwise start arena.py in the background, then open it.
 PORT="${ARENA_PORT:-8765}"; URL="http://127.0.0.1:$PORT/"
 
-# Messages follow the macOS language: Chinese if the first preferred language is Chinese, otherwise English.
+# Messages come from locales/<language>.json ("launcher" section), following the first preferred macOS language.
+# They are read with plutil (built into macOS) so they work even when Python is missing; English is the fallback.
 case "$(/usr/bin/defaults read -g AppleLanguages 2>/dev/null | sed -n '2p' | tr -d ' ",')" in
-  zh*) ZH=1 ;;
-  *)   ZH=0 ;;
+  zh*) LANG_CODE=zh ;;
+  ja*) LANG_CODE=ja ;;
+  *)   LANG_CODE=en ;;
 esac
-msg() { if [ "$ZH" = 1 ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
+LOCALES=""
+msg() {  # msg <key> <English fallback>
+  local v=""
+  [ -n "$LOCALES" ] && v="$(/usr/bin/plutil -extract "launcher.$1" raw -o - "$LOCALES/$LANG_CODE.json" 2>/dev/null)"
+  printf '%s' "${v:-$2}"
+}
 
 alert() {
-  /usr/bin/osascript -e "display dialog \"$1\" with title \"AI Arena\" buttons {\"$(msg '好' 'OK')\"} default button 1 with icon caution" >/dev/null 2>&1
+  /usr/bin/osascript -e "display dialog \"$1\" with title \"AI Arena\" buttons {\"$(msg ok OK)\"} default button 1 with icon caution" >/dev/null 2>&1
 }
 
 # An app started from Finder gets a minimal PATH. Read the login shell's PATH so claude / codex / agy can be found.
@@ -24,9 +31,11 @@ DIR="$HOME/Downloads/3tools"
 for d in "$APP_PARENT" "$(dirname "$APP_PARENT")"; do
   if [ -f "$d/arena.py" ]; then DIR="$d"; break; fi
 done
+for d in "$DIR" "$APP_PARENT" "$(dirname "$APP_PARENT")"; do
+  if [ -d "$d/locales" ]; then LOCALES="$d/locales"; break; fi
+done
 [ -f "$DIR/arena.py" ] || {
-  alert "$(msg '找不到 arena.py。\n请把 AI Arena.app 放在 arena.py 所在文件夹（或其 macos/ 子文件夹），或放在 ~/Downloads/3tools。' \
-               'arena.py not found.\nPut AI Arena.app in the folder that contains arena.py (or its macos/ subfolder), or in ~/Downloads/3tools.')"
+  alert "$(msg not_found 'arena.py not found.\nPut AI Arena.app in the folder that contains arena.py (or its macos/ subfolder), or in ~/Downloads/3tools.')"
   exit 1
 }
 
@@ -35,8 +44,7 @@ if alive; then /usr/bin/open "$URL"; exit 0; fi
 
 PY="$(command -v python3)"
 if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then
-  alert "$(msg '没有找到 Python 3.8+。\n请先安装：brew install python，或在终端运行 xcode-select --install。' \
-               'Python 3.8+ not found.\nInstall it with brew install python, or run xcode-select --install in Terminal.')"
+  alert "$(msg no_python 'Python 3.8+ not found.\nInstall it with brew install python, or run xcode-select --install in Terminal.')"
   exit 1
 fi
 
@@ -49,5 +57,5 @@ for _ in $(seq 1 60); do
   sleep 0.25
   if alive; then /usr/bin/open "$URL"; exit 0; fi
 done
-alert "$(msg '启动失败，日志：' 'AI Arena failed to start. Log:')\n$(tail -5 arena.log | sed 's/"/'"'"'/g')"
+alert "$(msg start_failed 'AI Arena failed to start. Log:')\n$(tail -5 arena.log | sed 's/"/'"'"'/g')"
 exit 1

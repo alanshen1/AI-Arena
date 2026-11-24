@@ -4,27 +4,24 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 RESPONSES_URL = "https://api.openai.com/v1/responses"
-MESSAGES = {
-    "zh": {
-        "key": "请先设置 ARENA_OPENAI_API_KEY，再重启应用。",
-        "auth": "OpenAI API 拒绝了凭证。请检查 Key、项目权限和模型访问权限。",
-        "quota": "OpenAI API 暂时无法接收请求。请检查 API 项目的额度、余额和速率限制。",
-        "network": "OpenAI API 连接中断或超时。请检查网络后重试。",
-        "stream": "OpenAI API 的回答未完整返回。",
-    },
-    "en": {
-        "key": "Set ARENA_OPENAI_API_KEY for Arena, then restart the app.",
-        "auth": "OpenAI API rejected the credentials or project permissions. Check the key and model access.",
-        "quota": "OpenAI API is limiting requests. Check the project's balance, quota, and rate limits.",
-        "network": "The OpenAI API connection failed or timed out. Check the network and retry.",
-        "stream": "The OpenAI API response did not finish.",
-    },
-}
+LOCALE_DIR = Path(os.environ.get("ARENA_LOCALES", Path(__file__).resolve().parent / "locales"))
+
+
+def load_messages(lang):
+    """Error messages from locales/<lang>.json ("openai" section), falling back to English."""
+    out = {}
+    for code in ("en", lang):
+        try:
+            out.update(json.loads((LOCALE_DIR / f"{code}.json").read_text(encoding="utf-8")).get("openai", {}))
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 def events(stream):
@@ -42,7 +39,7 @@ def events(stream):
 
 
 def run(args):
-    messages = MESSAGES[args.lang]
+    messages = load_messages(args.lang)
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         print(messages["key"], file=sys.stderr)
@@ -103,6 +100,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="gpt-6.2-sol")
     parser.add_argument("--effort", choices=("low", "medium", "high", "xhigh"), default="medium")
-    parser.add_argument("--lang", choices=tuple(MESSAGES), default="zh")
+    parser.add_argument("--lang", default="en")
     parser.add_argument("--instructions", default="")
     sys.exit(run(parser.parse_args()))

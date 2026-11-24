@@ -1,0 +1,660 @@
+{
+ "_meta": {
+  "name": "EN",
+  "html_lang": "en",
+  "date_locale": "en-US"
+ },
+ "ui": {
+  "nav.compare": "Compare",
+  "nav.history": "History",
+  "nav.stats": "Stats",
+  "nav.env": "Setup",
+  "conn": "The background service is not running. Reopen AI Arena.",
+  "cancel": "Cancel",
+  "pp.btn": "Prompts",
+  "pp.title": "Prompts",
+  "pp.new": "New",
+  "pp.close": "Close",
+  "pp.search": "Search titles and text",
+  "pp.saveCur": "Save input",
+  "pp.saveCur.title": "Save what is in the question box as a prompt",
+  "pp.cats": "Categories",
+  "pp.all": "All",
+  "pp.insert": "Insert into the question box",
+  "pp.pinned": "Pinned",
+  "pp.pin": "Pin",
+  "pp.unpin": "Unpin",
+  "pp.edit": "Edit",
+  "pp.del": "Delete",
+  "pp.sure": "Delete?",
+  "pp.empty": "No prompts yet. Click New, or write a question and click Save input.",
+  "pp.noMatch": "No matching prompts",
+  "pp.nothing": "The question box is empty",
+  "pp.saved": "Saved",
+  "pp.f.title": "Title",
+  "pp.f.titlePh": "Leave empty to use the first line",
+  "pp.f.cat": "Category",
+  "pp.f.catPh": "For example: Coding, Learning",
+  "pp.f.body": "Text",
+  "pp.f.save": "Save",
+  "pp.f.hint": "Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.",
+  "pp.help": "Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.",
+  "pp.restore": "Restore built-in prompts",
+  "pp.restore.title": "Add back any built-in prompts you deleted; your own prompts are not affected",
+  "pp.restored": "Restored {0} built-in prompts",
+  "pp.restoredNone": "All built-in prompts are already here",
+  "quit": "Quit",
+  "quit.title": "Stop the background service",
+  "prompt.ph": "Ask a question and the selected models answer side by side",
+  "send": "Send",
+  "toSend": "to send",
+  "tag": "Tag",
+  "tag.ph": "Tag, e.g. writing",
+  "cwd": "Working folder",
+  "cwd.ph": "Working folder (optional)",
+  "recent": "Recent comparisons",
+  "collapseAll": "Collapse all",
+  "empty": "No comparisons yet. Ask a question above and the selected models will answer side by side.",
+  "hq.ph": "Search questions",
+  "sby.tool": "By tool",
+  "sby.model": "By tool, model and effort",
+  "stats.note": "Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.",
+  "recheck": "Check again",
+  "env.path": "Searched PATH",
+  "env.note": "For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.",
+  "reader": "Reader",
+  "reader.hint": "← → switch   Esc close",
+  "raw": "Raw / formatted",
+  "copyAns": "Copy answer",
+  "close": "Close",
+  "err.offline": "Cannot reach the background service. Reopen AI Arena.",
+  "err.req": "Request failed {0}",
+  "copyFail": "Copy failed",
+  "default": "Default",
+  "lane.on": "Include in this round",
+  "lane.modelAria": "{0} model",
+  "lane.model": "Model",
+  "lane.noModel": "This tool has no model option configured",
+  "lane.custom": "Custom model ID…",
+  "lane.effAria": "{0} effort",
+  "lane.effTitle": "Effort: how hard the model thinks. Higher goes deeper but is slower and uses more quota",
+  "lane.effDefault": "Effort default",
+  "lane.customPrompt": "Enter a model ID for {0} (passed to its CLI as the model option)",
+  "st.queued": "Queued",
+  "st.run": "Generating",
+  "st.ok": "Done",
+  "st.err": "Error {0}",
+  "tie": "Tie",
+  "bestOf": "Best: {0}",
+  "stop": "Stop",
+  "rerun": "Rerun",
+  "rerun.title": "Ask the first question again as a new conversation",
+  "fq.ph": "Ask a follow-up. Each tool continues its own conversation",
+  "fq": "Follow-up",
+  "fgo": "Follow up",
+  "fhint": "Uses the same tools, models and effort as the last round.",
+  "peers.label": "Include the other answers",
+  "peers.title": "Send each tool the other models' answers from the previous round, labeled by model, so it can compare, critique or combine them. Turn off to keep answers independent.",
+  "peers.chip": "Saw other answers",
+  "rounds": "{0} rounds",
+  "roundN": "Round {0}",
+  "loading": "Loading…",
+  "allFull": "Expand all",
+  "allFold": "Collapse all",
+  "more": "Show full answer",
+  "less": "Show less",
+  "stars": "{0} stars",
+  "note.ph": "Add a note",
+  "note.aria": "Note for {0}",
+  "best": "Best",
+  "log": "Process log",
+  "logEmpty": "(empty)",
+  "c.notFound": "This tool was not found. ",
+  "c.install": "Install it on the Setup page",
+  "c.thinking": "Thinking",
+  "c.noOut": "No output. See the process log below.",
+  "copy": "Copy",
+  "copied": "Copied",
+  "m.actual": "Actual model: {0}",
+  "m.chosen": " (selected: {0})",
+  "m.model": "Model: {0}",
+  "m.effort": "Effort: {0}",
+  "cost": "   ≈ ${0}",
+  "j.autoTitle": "After each round, send the answers anonymously to {0} for scoring",
+  "j.auto": "{0} auto-score",
+  "j.modelAria": "Scoring model",
+  "j.ask": "Ask {0} to score and compare",
+  "d.title": "Disagreements and agreement",
+  "d.nConf": "{0} disagreements",
+  "d.nFact": " ({0} factual)",
+  "d.noConf": "No real disagreements",
+  "d.nCons": "{0} shared points",
+  "d.nConf1": "1 disagreement",
+  "d.nCons1": "1 shared point",
+  "d.dot": " · ",
+  "d.k.fact": "Facts differ",
+  "d.k.advice": "Advice differs",
+  "d.k.emphasis": "Emphasis differs",
+  "d.na": "Not mentioned",
+  "d.verdict": "{0}: ",
+  "d.cons": "All answers agree",
+  "j.busy": "{0} is scoring…",
+  "j.elapsed": "{0}s so far",
+  "j.last": "Latest output: {0}",
+  "j.again": "Score again",
+  "j.retry": "Retry scoring",
+  "j.sending": "Shuffled and sent anonymously to {0}…",
+  "j.fail": "Scoring failed: {0}",
+  "j.unknown": "unknown reason",
+  "j.none": "none",
+  "j.agree": "matches your pick",
+  "j.best": "{0} picks as best: ",
+  "j.sep": ". ",
+  "k.accuracy": "Accuracy",
+  "k.completeness": "Completeness",
+  "k.clarity": "Clarity",
+  "k.usefulness": "Usefulness",
+  "t.busy": "The last round is still running. Wait for it to finish before following up.",
+  "t.pickTool": "Select at least one tool",
+  "h.unrated": "Not rated",
+  "h.open": "Open",
+  "h.del": "Delete",
+  "h.none": "No matching conversations",
+  "h.confirm": "Delete this conversation, including all follow-ups?",
+  "s.total": "{0} rounds, {1} judged",
+  "s.tool": "Tool",
+  "s.n": "Rounds",
+  "s.ok": "Success",
+  "s.avg": "Avg score",
+  "s.rated": "Rated",
+  "s.best": "Best",
+  "s.win": "Win rate",
+  "s.secs": "Avg time",
+  "s.chars": "Avg length",
+  "s.none": "No data yet",
+  "sj.title": "{0} scores",
+  "sj.empty": "No {0} scores yet. Turn on \"{0} auto-score\" in the composer, or click \"Ask {0} to score and compare\" under any round.",
+  "sj.agree": "Your pick matched {0}: {1} / {2} ({3}%)",
+  "sj.agreeEmpty": "The more rounds you both pick a best for, the more meaningful the match rate",
+  "sj.avg": "{0} avg score",
+  "sj.n": "Answers scored",
+  "sj.best": "Picked best by {0}",
+  "e.checking": "Checking, this takes a few seconds…",
+  "e.node": "Node {0}. ",
+  "e.noNode": "Node.js not found. ",
+  "e.where": "Install puts tools in ~/.ai-arena and needs no admin rights.",
+  "e.tool": "Tool",
+  "e.status": "Status",
+  "e.ver": "Version",
+  "e.path": "Location",
+  "e.act": "Action",
+  "e.login": "Sign in",
+  "e.installing": "Installing…",
+  "e.install": "Install",
+  "e.judge": "judge",
+  "e.ok": "Installed",
+  "e.missing": "Not found",
+  "e.missingExe": "Not found: {0}",
+  "e.job": "{0} install log: {1}",
+  "e.running": "running",
+  "e.done": "succeeded",
+  "e.failed": "failed",
+  "e.opened": "Terminal opened",
+  "allTags": "All tags",
+  "quit.confirm": "Stop the AI Arena background service? Running comparisons will be stopped.",
+  "quit.done": "AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.",
+  "att.btn": "Attach files",
+  "att.title": "Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.",
+  "att.uploading": "Uploading",
+  "att.chars": "{0} characters extracted",
+  "att.image": "Image; tools can open it",
+  "att.noText": "No text extracted; tools can open the file",
+  "att.fail": "Upload failed",
+  "att.remove": "Remove",
+  "att.pending": "Attachments are still uploading. Please wait.",
+  "att.tooBig": "{0} is larger than 50 MB and cannot be added",
+  "att.open": "Open the original file",
+  "att.count": "{0} attachments",
+  "chat.label": "Chat mode",
+  "chat.title": "For everyday questions. Every tool gets the same instructions: answer like a general-purpose assistant, and for plans give a recommendation and an example you can follow. Follow-ups keep this setting.",
+  "e.showOpenai": "Show OpenAI GPT",
+  "e.openaiNoKey": "Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare",
+  "t.enableOpenai": "Show OpenAI GPT on the Setup page, then select it in Compare.",
+  "lane.apiKey": "API key required",
+  "lane.apiSetup": "Set ARENA_OPENAI_API_KEY for Arena, then restart. This option uses separate API credits.",
+  "chat.chip": "Chat mode",
+  "status.not_installed": "Not installed",
+  "status.start_failed": "Failed to start",
+  "status.timeout": "Timed out",
+  "status.canceled": "Canceled",
+  "status.interrupted": "Interrupted",
+  "j.answerWord": "Answer",
+  "lang.aria": "Language"
+ },
+ "msg": {
+  "detect_timeout": "(check timed out)",
+  "node_use": "Using installed Node {ver} ({d})\n",
+  "node_none": "No Node 20+ found (system has {old}); these CLIs need Node 20+.\nDownloading a private Node 22 to {dir} (your system Node is untouched)…\n",
+  "node_old_is": "{v}",
+  "node_old_none": "no Node",
+  "node_unsupported": "Automatic Node download is not supported on this system. Install Node 20+ manually.",
+  "node_index_fail": "Failed to fetch the Node version list: {e}",
+  "node_dl": "Downloading {url} (about 50 MB)…\n",
+  "node_dl_fail": "Failed to download Node: {e}",
+  "node_ready": "Node {ver} is ready\n",
+  "no_install": "This tool has no install method configured",
+  "installing": "Already installing",
+  "install_ok": "\n✅ Installed. Next, click Sign in to finish the one-time sign-in.\n",
+  "install_fail": "\nInstall failed. See the log above.\n",
+  "no_login": "This tool has no sign-in command configured",
+  "login_manual": "Run this in Terminal: {cmd}",
+  "login_title": "▶ {tool} sign-in: {hint}",
+  "login_done": "When you are done, close this window and click Check again in AI Arena.",
+  "tag_think": "[reasoning] ",
+  "tag_cmd": "[command] ",
+  "tag_err": "[error] ",
+  "tag_usage": "[usage] ",
+  "tag_step": "[step] ",
+  "tag_status": "[status] ",
+  "agy_raw": "[raw output] Could not parse an answer from agy's output. Raw output:\n",
+  "resume_native": "[resume] Continuing {name}'s own session {sid}…\n",
+  "resume_transcript": "[resume] No session ID from the last round, so the previous {n} round(s) of Q&A were added before the question\n",
+  "cmd_missing": "Command not found: {exe}\nSee the Setup page for the searched PATH. Install it there, or put the full path in {cfg}.\n",
+  "judge_busy": "Already scoring",
+  "judge_none": "No scoring model configured",
+  "judge_missing": "{exe} not found. Install {label} on the Setup page first.",
+  "run_missing": "This round does not exist",
+  "judge_two": "Scoring needs at least two successful answers",
+  "judge_exit": "{label} exited with code {code}",
+  "judge_parse": "Could not parse scores from {label}'s reply",
+  "judge_timeout": "{label} did not reply within {sec} seconds",
+  "env_stripped": "[auth] Ignored the environment variable {names}; using the CLI's own sign-in\n",
+  "chat_note": "[chat mode] Asked to answer like a general-purpose assistant\n",
+  "too_big": "File too large (limit {mb} MB)",
+  "attach_missing": "Attachment missing or expired; add it again: {name}",
+  "peers_note": "[other answers] Included the previous answers from {names} for comparison\n",
+  "attach_note": "[attachments] {n} file(s), about {chars} characters of text\n",
+  "judge_interrupted": "Scoring was interrupted (the background service restarted). Try again.",
+  "judge_timeout_tail": "{label} did not finish within {sec} seconds. Last output: {tail}",
+  "judge_no_output": "(no output at all)",
+  "parent_missing": "The round you are following up on does not exist",
+  "bad_token": "Invalid token. Reload the page.",
+  "no_judgment": "Not scored yet",
+  "empty_prompt": "The question is empty",
+  "no_dir": "Folder does not exist: {d}",
+  "need_openai": "Show OpenAI GPT on the Setup page and select it in Compare before continuing this thread.",
+  "no_tools": "Select at least one tool."
+ },
+ "tools": {
+  "claude": {
+   "hint": "Follow the prompts to sign in, then type /exit",
+   "default_label": "Default (account default)"
+  },
+  "codex": {
+   "hint": "A browser opens; sign in with your ChatGPT account",
+   "default_label": "Default (recommended)"
+  },
+  "openai": {
+   "hint": "",
+   "default_label": "Default (GPT-6.2 Sol)"
+  },
+  "antigravity": {
+   "hint": "Sign in with your Google account, then type /quit",
+   "default_label": "Default (auto)"
+  },
+  "grok": {
+   "hint": "A browser opens; sign in with your xAI / X account",
+   "default_label": "Default"
+  },
+  "gemini": {
+   "hint": "Choose Login with Google, then type /quit",
+   "default_label": "Default (Auto routing)"
+  }
+ },
+ "model": {
+  "chat_prefix": "Answer the question below the way a general-purpose AI assistant would, not as a coding agent: give a complete, well-structured answer the person can act on, using headings, lists or tables where they help. For advice, a plan or a proposal, give your recommendation first, then a concrete example detailed enough to follow, with steps, quantities or ranges, alternatives and how to adjust them as relevant. If personal details are missing, state your assumptions and who the answer suits. Follow any length the person asks for, and keep simple factual answers short. Apart from viewing the attachments listed below, do not read or write local files or run commands unless the question really needs it. Answer in the language of the question.\n\n",
+  "question_label": "Question:\n",
+  "attach_intro_paths": "Attached files ({n}). Their text content is included below. The original files are saved on this computer; open them read-only if you need images, charts, formulas or layout that the text does not capture.",
+  "attach_intro_text": "Attached files ({n}), text content only:",
+  "attach_header": "[Attachment {i}: {name} ({kind}, {chars} characters)]",
+  "attach_path": "Path: ",
+  "attach_no_text_paths": "(No text could be extracted. Open the original file to view it.)",
+  "attach_no_text": "(No text could be extracted, e.g. an image.)",
+  "attach_trunc_paths": "\n…(only the first {cap} characters are included; open the file for the rest)",
+  "attach_trunc": "\n…(truncated to the first {cap} characters)",
+  "peers_intro": "For reference, here are the other models' answers to the previous question. Your own previous answer is in our conversation history; together they are all the answers from that round.\n",
+  "peer_header": "[Answer from {name}]",
+  "peer_label": "{label} ({model})",
+  "truncated": "\n…(truncated)",
+  "transcript_intro": "Below is our conversation so far. Answer the new question at the end with it in mind.\n",
+  "transcript_round": "[Round {i}: my question]\n{q}\n\n[Round {i}: your answer]\n{a}\n",
+  "no_answer": "(no answer)",
+  "new_question": "[New question]\n{prompt}",
+  "judge_attach_intro": "The question came with attachments. Their text is below for checking the answers.\n\n"
+ },
+ "judge": {
+  "intro": [
+   "You are a strict, fair reviewer. Below are several anonymous answers to the same question, labeled Answer A, Answer B, Answer C…, in random order.",
+   "Judge on content only. Do not guess or consider which model wrote each one. Do not use any tools or read or write files."
+  ],
+  "earlier_intro": "This is one round of a multi-turn conversation. Before this, the user asked, in order:",
+  "earlier_note": "(Each answerer can see its own earlier conversation.)",
+  "question_head": "[Question]",
+  "answer_head": "[Answer {label}]",
+  "criteria": [
+   "Scoring criteria (1 to 5 each, 5 is best):",
+   "- accuracy: are the facts correct, with no errors or fabrication",
+   "- completeness: does it cover the key aspects of the question",
+   "- clarity: is it well structured and easy to read",
+   "- usefulness: does it genuinely help the person who asked",
+   "- overall 1 to 5: your overall judgment, not a simple average",
+   "",
+   "Also find where the answers agree and where they disagree:",
+   "- consensus: key conclusions all answers share, at most 5, one sentence each.",
+   "- conflicts: substantive disagreements between answers, at most 6. List only differences in content (facts, numbers, conclusions, advice, approach), not in wording, length or formatting. Use an empty array if there are none. Each has:",
+   "  - topic: the point of disagreement, one sentence.",
+   "  - kind: fact (facts or numbers conflict, so at least one is wrong), advice (different recommendations or approaches) or emphasis (different priorities or trade-offs).",
+   "  - positions: what each answer says on this point, one sentence each; write \"not mentioned\" if it does not address it.",
+   "  - verdict: which position is more credible and why; if you cannot tell, say how to check."
+  ],
+  "format_intro": "Output only one JSON object and no other text. Format:",
+  "format_example": "{\"scores\":{\"A\":{\"accuracy\":4,\"completeness\":4,\"clarity\":5,\"usefulness\":4,\"overall\":4,\"comment\":\"one-sentence comment in English\"}},\"best\":\"A\",\"reason\":\"one or two sentences in English on why it is best\",\"consensus\":[\"one sentence\"],\"conflicts\":[{\"topic\":\"one sentence\",\"kind\":\"fact\",\"positions\":{\"A\":\"one sentence\",\"B\":\"one sentence\"},\"verdict\":\"one or two sentences\"}]}",
+  "format_note": "Include every answer in scores and in each positions object. Refer to answers as \"Answer A\", \"Answer B\" and so on. If they are too close to call, set best to \"tie\"."
+ },
+ "parse": {
+  "answer_word": "Answer",
+  "tie": "tie",
+  "not_mentioned": "not mentioned",
+  "default_words": [
+   "default",
+   "current",
+   "selected",
+   "active"
+  ]
+ },
+ "openai": {
+  "key": "Set ARENA_OPENAI_API_KEY for Arena, then restart the app.",
+  "auth": "OpenAI API rejected the credentials or project permissions. Check the key and model access.",
+  "quota": "OpenAI API is limiting requests. Check the project's balance, quota, and rate limits.",
+  "network": "The OpenAI API connection failed or timed out. Check the network and retry.",
+  "stream": "The OpenAI API response did not finish."
+ },
+ "prompts": {
+  "explain": [
+   "Learning",
+   "Explain a concept",
+   "Explain {{concept}} in plain language: what it is, why it matters, a concrete example, and common misconceptions."
+  ],
+  "three-levels": [
+   "Learning",
+   "Three levels deep",
+   "Explain {{topic}} at three levels: an analogy a ten-year-old would get, a university-level explanation, then the details and debates experts care about."
+  ],
+  "concept-diff": [
+   "Learning",
+   "Tell two concepts apart",
+   "How do {{concept A}} and {{concept B}} differ, and how are they related? Use a comparison table for definition, where each applies and a typical example, then point out where people most often confuse them."
+  ],
+  "learning-plan": [
+   "Learning",
+   "Study plan",
+   "I want to learn {{skill}} in {{time frame}}. My current level is {{current level}} and I can spend {{time per day}} a day. Give me a week-by-week plan: goals, concrete exercises, recommended resources, and how to check that I have really learned it."
+  ],
+  "quiz-me": [
+   "Learning",
+   "Quiz me",
+   "Write 10 questions on {{topic}}, from easy to hard, mixing multiple choice and short answer. List only the questions first; after I answer, mark them and explain."
+  ],
+  "background": [
+   "Learning",
+   "Background and history",
+   "Walk me through the story of {{event or idea}}: the context, key people and turning points, the main schools of thought or positions, and its influence today. End with a few books worth reading."
+  ],
+  "polish": [
+   "Writing",
+   "Polish text",
+   "Polish the text below. Keep the meaning and tone, and make it clearer, shorter and more natural. Give the revised version first, then list the main changes and why.\n\n{{paste text}}"
+  ],
+  "email": [
+   "Writing",
+   "Write an email",
+   "Write an email to {{recipient}} to {{purpose}}. Tone: {{formal / friendly / brief}}. Keep it under 150 words and include a subject line. Key points:\n{{key points}}"
+  ],
+  "rewrite-audience": [
+   "Writing",
+   "Rewrite for an audience",
+   "Rewrite the content below for {{audience}}: drop jargon they don't need, add the background they do, and keep it to about {{length}} words.\n\n{{paste content}}"
+  ],
+  "outline": [
+   "Writing",
+   "Article outline",
+   "Outline an article about {{topic}} for {{readers}}. Give 3 title options, section headings with the points each section covers, and write the opening paragraph."
+  ],
+  "titles": [
+   "Writing",
+   "Headline ideas",
+   "Suggest 10 headlines for the content below in three styles: straightforward, attention-grabbing and question-based. Say which one you recommend and why.\n\n{{content summary}}"
+  ],
+  "strict-editor": [
+   "Writing",
+   "Strict editor's review",
+   "Review the text below like a strict editor: point out logical gaps, weak evidence, wordiness and vague spots, ranked by importance, each with a suggested fix.\n\n{{paste text}}"
+  ],
+  "code-review": [
+   "Coding",
+   "Code review",
+   "Review the code below. List issues by severity (bugs, security, performance, readability), each with a suggested fix and example code:\n\n{{paste code}}"
+  ],
+  "explain-code": [
+   "Coding",
+   "Explain code",
+   "Explain the code below section by section: what it does and why it is written this way. Point out hidden assumptions and edge cases where it could break.\n\n{{paste code}}"
+  ],
+  "debug": [
+   "Coding",
+   "Debug an error",
+   "I'm getting this error:\n{{error message}}\n\nRelevant code:\n{{code}}\n\nEnvironment: {{language / framework / version}}. List the likely causes from most to least likely, each with a way to confirm it and a fix."
+  ],
+  "unit-tests": [
+   "Coding",
+   "Write unit tests",
+   "Write unit tests for the function below using {{test framework}}. Cover normal cases, edge cases and bad input, and say what each test checks.\n\n{{paste code}}"
+  ],
+  "refactor": [
+   "Coding",
+   "Refactor code",
+   "Refactor the code below without changing its behavior, aiming for better {{readability / performance / testability}}. Show the result and explain each change.\n\n{{paste code}}"
+  ],
+  "tech-choice": [
+   "Coding",
+   "Choose a technology",
+   "I'm building {{project}} and choosing between {{option A}}, {{option B}} and {{option C}}. Compare learning curve, performance, ecosystem, maintenance cost and fit with my team, then recommend one. Team: {{team details}}"
+  ],
+  "sql": [
+   "Coding",
+   "Write SQL",
+   "Here is the schema:\n{{schema}}\n\nWrite a SQL query that {{requirement}}. Explain the approach and which indexes it needs to run fast."
+  ],
+  "regex": [
+   "Coding",
+   "Regular expression",
+   "Write a regular expression that matches {{what to match}} but not {{what to exclude}}. Explain it piece by piece and give 5 strings that should match and 5 that should not."
+  ],
+  "system-design": [
+   "Coding",
+   "System design",
+   "Design {{system}} for {{users / requests}}. Describe the architecture, core components, data model and key trade-offs, and what would change at ten times the scale."
+  ],
+  "compare-options": [
+   "Decisions",
+   "Compare two options",
+   "Compare {{option A}} and {{option B}}: where each fits, pros and cons, cost and risk. End with your recommendation and why."
+  ],
+  "decide": [
+   "Decisions",
+   "Help me decide",
+   "I'm considering {{decision}}. My situation: {{background}}. List the reasons for and against, the key uncertainties, the worst case and how I'd handle it. Then give your advice and what would make you change your mind."
+  ],
+  "premortem": [
+   "Decisions",
+   "Pre-mortem",
+   "Imagine that a year from now {{plan}} has failed completely. List the 8 most likely reasons, ranked by likelihood and impact, each with something I can do now to prevent it."
+  ],
+  "devils-advocate": [
+   "Decisions",
+   "Devil's advocate",
+   "My view: {{your view}}. Argue the other side as strongly as you can, with evidence, then point out the weakest part of my view."
+  ],
+  "prioritize": [
+   "Decisions",
+   "Prioritize tasks",
+   "Here are my tasks. Rank them by importance and urgency with reasons, and suggest which to postpone, delegate or drop:\n\n{{task list}}"
+  ],
+  "meeting-notes": [
+   "Work",
+   "Meeting notes",
+   "Turn the notes below into meeting minutes: conclusions, decisions, action items (owner and due date) and open questions.\n\n{{paste notes}}"
+  ],
+  "weekly-report": [
+   "Work",
+   "Weekly report",
+   "Write a weekly report from the notes below: done this week, key numbers, problems, plan for next week. Keep it brief; the reader is {{reader}}.\n\n{{work notes}}"
+  ],
+  "exec-summary": [
+   "Work",
+   "One-page executive brief",
+   "Condense the content below into a one-page brief for leadership: a one-sentence conclusion, three key points, and the decision or support you need from them.\n\n{{content}}"
+  ],
+  "project-plan": [
+   "Work",
+   "Project plan",
+   "Draft a plan for {{project}}: goals and success criteria, milestones and timeline, resources needed, and the main risks with mitigations. The deadline is {{date}}."
+  ],
+  "feedback": [
+   "Work",
+   "Give feedback",
+   "Help me write feedback for {{person}}. Situation: {{situation}}. Be specific and focus on the work, not the person: start with what went well, then what to improve and how."
+  ],
+  "interview-prep": [
+   "Work",
+   "Interview prep",
+   "I'm interviewing for {{role}} at {{company}}. List the 10 most likely questions (half technical, half behavioral), with how to approach each and key points, plus 3 questions I can ask the interviewer."
+  ],
+  "research-state": [
+   "Research",
+   "State of research",
+   "Summarize the state of research on {{topic}}: main schools and leading figures, key studies and findings, and open or disputed questions. Separate established consensus from single-study findings, and suggest further reading."
+  ],
+  "market": [
+   "Research",
+   "Market analysis",
+   "Analyze {{market or industry}}: size and growth, main players and their strengths, customer needs, trends and risks. Flag which numbers need checking."
+  ],
+  "competitors": [
+   "Research",
+   "Compare products",
+   "Compare {{product A}}, {{product B}} and {{product C}}: positioning, core features, pricing, pros and cons, and who each suits. Use a table and end with a recommendation."
+  ],
+  "summarize-article": [
+   "Research",
+   "Summarize and assess an article",
+   "Summarize the article below in three sentences, list its main arguments and evidence, then judge whether the reasoning holds up and which opposing views it leaves out.\n\n{{paste article}}"
+  ],
+  "fact-check": [
+   "Fact-check",
+   "Fact-check",
+   "Fact-check the text below. Mark each claim or number as correct, wrong or unverifiable, and explain why:\n\n{{paste text}}"
+  ],
+  "credibility": [
+   "Fact-check",
+   "Is this claim credible?",
+   "I came across this claim: \"{{claim}}\". Assess how credible it is: likely sources, evidence for and against, common distorted versions, and how I can check it myself."
+  ],
+  "check-math": [
+   "Fact-check",
+   "Check the math",
+   "Check the calculation and reasoning below: redo it step by step, point out any errors, and give the correct result.\n\n{{paste content}}"
+  ],
+  "compare-answers": [
+   "Follow-up",
+   "Compare the answers",
+   "Compare the models' answers from the last round: where they agree, where they contradict each other, and whose reasoning is stronger. Then combine them into the best answer."
+  ],
+  "find-gaps": [
+   "Follow-up",
+   "What was missed?",
+   "Did the last answers miss any important cases, risks or counterexamples? Add them and explain how they change the conclusion."
+  ],
+  "more-concrete": [
+   "Follow-up",
+   "Make it concrete",
+   "Make the answer above more concrete: steps I can follow directly, specific numbers, and one complete worked example."
+  ],
+  "summarize-attachments": [
+   "Documents",
+   "Summarize attachments",
+   "Summarize the attachments: give the conclusion in three sentences, then the key figures and any decisions I need to make."
+  ],
+  "doc-qa": [
+   "Documents",
+   "Answer from the attachments only",
+   "Answer using only the attachments: {{question}}. Quote the text that supports your answer; if the attachments don't say, tell me instead of guessing."
+  ],
+  "extract-table": [
+   "Documents",
+   "Extract into a table",
+   "Extract {{information to extract}} from the attachments into a table, noting where each item appears (page or section)."
+  ],
+  "analyze-sheet": [
+   "Documents",
+   "Analyze spreadsheet data",
+   "Analyze the spreadsheet in the attachments: give an overview, find trends and outliers, list the 3 most important findings, and suggest what to analyze next."
+  ],
+  "contract": [
+   "Documents",
+   "Contract key points",
+   "Read the contract in the attachments and list: each party's main obligations, payment and deadlines, liability for breach, termination terms, and clauses that are unfavorable to me or need attention. (This is not a substitute for legal advice.)"
+  ],
+  "translate": [
+   "Translation",
+   "Translate",
+   "Translate the text below into {{target language}}, keeping the meaning and tone and using terms consistently. Where there are several possible renderings or cultural differences, add a short note after the translation.\n\n{{paste text}}"
+  ],
+  "ja-business-email": [
+   "Translation",
+   "Japanese business email",
+   "Write a polite Japanese business email (with appropriate keigo) that says the following, with an English version alongside:\n\n{{what to say}}"
+  ],
+  "travel": [
+   "Life",
+   "Trip plan",
+   "Plan a {{number of days}}-day trip to {{destination}}. Travelers: {{who is going}}. Budget: {{budget}}. Preferences: {{preferences}}. Give a day-by-day plan, how to get around, where to stay, and things to watch out for."
+  ],
+  "buying-advice": [
+   "Life",
+   "Buying advice",
+   "I want to buy {{product type}} for {{main use}}, budget {{budget}}. Explain the specs that matter most, compare a few models, and tell me which you'd pick."
+  ],
+  "gift": [
+   "Life",
+   "Gift ideas",
+   "Suggest gifts for {{person}} for {{occasion}}, budget {{budget}}; they like {{interests}}. Give 8 ideas with reasons, split into safe choices and more original ones."
+  ],
+  "improve-prompt": [
+   "Prompting",
+   "Improve a prompt",
+   "Improve the prompt below so the AI's answer is more accurate and closer to what I need. Point out its problems first, then give the rewritten version:\n\n{{original prompt}}"
+  ],
+  "system-prompt": [
+   "Prompting",
+   "Write a system prompt",
+   "Write a system prompt for an AI assistant used for {{purpose}}: its role, target users, answer style, rules it must follow and things it must not do, plus two example conversations."
+  ]
+ },
+ "launcher": {
+  "ok": "OK",
+  "not_found": "arena.py not found.\nPut AI Arena.app in the folder that contains arena.py (or its macos/ subfolder), or in ~/Downloads/3tools.",
+  "no_python": "Python 3.8+ not found.\nInstall it with brew install python, or run xcode-select --install in Terminal.",
+  "start_failed": "AI Arena failed to start. Log:"
+ }
+}

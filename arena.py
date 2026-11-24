@@ -40,10 +40,10 @@ DEFAULT_CFG = {
                     "--verbose", "--include-partial-messages"],
             "parser": "claude_stream", "color": "#d97757",
             "package": "@anthropic-ai/claude-code",
-            "login": "claude", "hint": "首次运行按提示登录，完成后输入 /exit", "hint_en": "Follow the prompts to sign in, then type /exit",
+            "login": "claude", "hint": "Follow the prompts to sign in, then type /exit",
             "resume_args": ["--resume", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "strip_env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
-            "model_flag": "--model", "default_label": "默认（账户默认）", "default_label_en": "Default (account default)",
+            "model_flag": "--model", "default_label": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
                        {"id": "haiku", "label": "Haiku"}, {"id": "fable", "label": "Fable"}]},
@@ -51,8 +51,8 @@ DEFAULT_CFG = {
                   "parser": "codex_json", "color": "#10a37f",
                   "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [options] resume <ID> <question>
                   "package": "@openai/codex",
-                  "login": "codex login", "hint": "浏览器会打开，用 ChatGPT 账号登录", "hint_en": "A browser opens; sign in with your ChatGPT account",
-                  "model_flag": "-m", "default_label": "默认（推荐模型）", "default_label_en": "Default (recommended)",
+                  "login": "codex login", "hint": "A browser opens; sign in with your ChatGPT account",
+                  "model_flag": "-m", "default_label": "Default (recommended)",
                   "effort_args": ["-c", "model_reasoning_effort=\"{effort}\""],
                   "efforts": ["minimal", "low", "medium", "high", "xhigh"],
                   "models": [{"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"}, {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"},
@@ -60,8 +60,7 @@ DEFAULT_CFG = {
                              {"id": "gpt-6-luna", "label": "GPT-6 Luna"}]},
         "openai": {"label": "OpenAI GPT", "cmd": ["openai-responses", "{prompt}"],
                    "transport": "openai_responses", "default_on": False, "color": "#087e84",
-                   "model_flag": "--model", "default_label": "默认（GPT-6.2 Sol）",
-                   "default_label_en": "Default (GPT-6.2 Sol)",
+                   "model_flag": "--model", "default_label": "Default (GPT-6.2 Sol)",
                    "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh"],
                    "models": [{"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"},
                               {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"}]},
@@ -71,21 +70,21 @@ DEFAULT_CFG = {
             "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "pty": True,  # agy -p can hang without a terminal, so it runs in a pseudo-terminal
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-            "login": "agy", "hint": "按提示用 Google 账号登录，完成后输入 /quit", "hint_en": "Sign in with your Google account, then type /quit",
-            "model_flag": "--model", "default_label": "默认（自动选择）", "default_label_en": "Default (auto)",
+            "login": "agy", "hint": "Sign in with your Google account, then type /quit",
+            "model_flag": "--model", "default_label": "Default (auto)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models_cmd": ["agy", "models"], "models": []},
         "grok": {"role": "judge",  # the scoring model; it does not compete
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
                  "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
-                 "login": "grok login", "hint": "浏览器会打开，登录你的 xAI / X 账号", "hint_en": "A browser opens; sign in with your xAI / X account",
-                 "model_flag": "-m", "default_label": "默认", "default_label_en": "Default",
+                 "login": "grok login", "hint": "A browser opens; sign in with your xAI / X account",
+                 "model_flag": "-m", "default_label": "Default",
                  "models": [{"id": "grok-4.7", "label": "Grok 4.7"}, {"id": "grok-4.5", "label": "Grok 4.5"}]},
         "gemini": {"enabled": False,  # personal accounts stopped working on 2026-06-18; set to true if you have a paid Gemini API key
                    "cmd": ["gemini", "-p", "{prompt}"], "parser": "raw", "color": "#4285f4",
                    "package": "@google/gemini-cli",
-                   "login": "gemini", "hint": "选 Login with Google 完成登录，然后输入 /quit", "hint_en": "Choose Login with Google, then type /quit",
-                   "model_flag": "-m", "default_label": "默认（Auto 自动路由）", "default_label_en": "Default (Auto routing)",
+                   "login": "gemini", "hint": "Choose Login with Google, then type /quit",
+                   "model_flag": "-m", "default_label": "Default (Auto routing)",
                    "models": [{"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro"},
                               {"id": "gemini-3-pro-preview", "label": "Gemini 3 Pro"},
                               {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash"},
@@ -95,62 +94,70 @@ DEFAULT_CFG = {
 }
 
 
-# ---------------- Interface language (the front end sends zh / en in the X-Arena-Lang header) ----------------
-MSG = {
-    "detect_timeout": ("（检测超时）", "(check timed out)"),
-    "node_use": ("使用已安装的 Node {ver}（{d}）\n", "Using installed Node {ver} ({d})\n"),
-    "node_none": ("没有找到 Node 20+（系统里{old}），这些 CLI 需要 Node 20+。\n下载独立的 Node 22 到 {dir}（不影响系统里的 Node）…\n",
-                  "No Node 20+ found (system has {old}); these CLIs need Node 20+.\nDownloading a private Node 22 to {dir} (your system Node is untouched)…\n"),
-    "node_old_is": ("是 {v}", "{v}"), "node_old_none": ("没有 Node", "no Node"),
-    "node_unsupported": ("当前系统不支持自动下载 Node，请手动安装 Node 20+", "Automatic Node download is not supported on this system. Install Node 20+ manually."),
-    "node_index_fail": ("获取 Node 版本列表失败：{e}", "Failed to fetch the Node version list: {e}"),
-    "node_dl": ("下载 {url}（约 50MB）…\n", "Downloading {url} (about 50 MB)…\n"),
-    "node_dl_fail": ("下载 Node 失败：{e}", "Failed to download Node: {e}"),
-    "node_ready": ("Node {ver} 就绪\n", "Node {ver} is ready\n"),
-    "no_install": ("这个工具没有配置安装方式", "This tool has no install method configured"),
-    "installing": ("已经在安装中", "Already installing"),
-    "install_ok": ("\n✅ 安装完成，下一步点「登录」完成一次性登录。\n", "\n✅ Installed. Next, click Sign in to finish the one-time sign-in.\n"),
-    "install_fail": ("\n安装失败，日志如上。\n", "\nInstall failed. See the log above.\n"),
-    "no_login": ("这个工具没有配置登录命令", "This tool has no sign-in command configured"),
-    "login_manual": ("请在终端运行：{cmd}", "Run this in Terminal: {cmd}"),
-    "login_title": ("▶ {tool} 登录：{hint}", "▶ {tool} sign-in: {hint}"),
-    "login_done": ("完成后可以关闭这个窗口，回到 AI Arena 点「重新检测」。", "When you are done, close this window and click Check again in AI Arena."),
-    "tag_think": ("[思考] ", "[reasoning] "), "tag_cmd": ("[命令] ", "[command] "), "tag_err": ("[错误] ", "[error] "),
-    "tag_usage": ("[用量] ", "[usage] "), "tag_step": ("[步骤] ", "[step] "), "tag_status": ("[状态] ", "[status] "),
-    "agy_raw": ("[原始输出] 没能从 agy 的输出里解析出回答，原始内容如下：\n", "[raw output] Could not parse an answer from agy's output. Raw output:\n"),
-    "resume_native": ("[续接] 沿用 {name} 自己的会话 {sid}…\n", "[resume] Continuing {name}'s own session {sid}…\n"),
-    "resume_transcript": ("[续接] 没有拿到上一轮的会话 ID，改为把之前 {n} 轮问答附在问题前面\n",
-                          "[resume] No session ID from the last round, so the previous {n} round(s) of Q&A were added before the question\n"),
-    "cmd_missing": ("找不到命令: {exe}\n已搜索的 PATH 见「环境」页。可在那里一键安装，或把完整路径写进 {cfg}。\n",
-                    "Command not found: {exe}\nSee the Setup page for the searched PATH. Install it there, or put the full path in {cfg}.\n"),
-    "judge_busy": ("已经在评分中", "Already scoring"), "judge_none": ("没有配置评分模型", "No scoring model configured"),
-    "judge_missing": ("没有找到 {exe}，请先在「环境」页安装 {label}", "{exe} not found. Install {label} on the Setup page first."),
-    "run_missing": ("这一轮不存在", "This round does not exist"),
-    "judge_two": ("至少要有两份成功的回答才能评分", "Scoring needs at least two successful answers"),
-    "judge_exit": ("{label} 退出码 {code}", "{label} exited with code {code}"),
-    "judge_parse": ("没能从 {label} 的回复里解析出评分", "Could not parse scores from {label}'s reply"),
-    "judge_timeout": ("{label} 超过 {sec} 秒没有回复", "{label} did not reply within {sec} seconds"),
-    "env_stripped": ("[认证] 已忽略环境变量 {names}，使用命令行工具自己的登录\n",
-                     "[auth] Ignored the environment variable {names}; using the CLI's own sign-in\n"),
-    "chat_note": ("[聊天模式] 已要求像通用助手那样完整作答\n", "[chat mode] Asked to answer like a general-purpose assistant\n"),
-    "too_big": ("文件太大（上限 {mb} MB）", "File too large (limit {mb} MB)"),
-    "attach_missing": ("附件不存在或已过期，请重新添加：{name}", "Attachment missing or expired; add it again: {name}"),
-    "peers_note": ("[其他回答] 已附上 {names} 上一轮的回答，方便对比\n",
-                   "[other answers] Included the previous answers from {names} for comparison\n"),
-    "attach_note": ("[附件] {n} 个，提取文字约 {chars} 字\n", "[attachments] {n} file(s), about {chars} characters of text\n"),
-    "judge_interrupted": ("评分被中断（后台服务重启过），可以重试", "Scoring was interrupted (the background service restarted). Try again."),
-    "judge_timeout_tail": ("{label} 超过 {sec} 秒没有完成。最后的输出：{tail}", "{label} did not finish within {sec} seconds. Last output: {tail}"),
-    "judge_no_output": ("（没有任何输出）", "(no output at all)"),
-    "parent_missing": ("要追问的那一轮不存在", "The round you are following up on does not exist"),
-    "bad_token": ("token 无效，请刷新页面", "Invalid token. Reload the page."),
-    "no_judgment": ("还没有评分", "Not scored yet"), "empty_prompt": ("问题为空", "The question is empty"),
-    "no_dir": ("目录不存在: {d}", "Folder does not exist: {d}"),
-}
+# ---------------- Interface language ----------------
+# All user-facing and model-facing text lives in locales/<code>.json (zh, en, ja, ...).
+# The front end sends the language code in the X-Arena-Lang header; English is the fallback for missing keys.
+LOCALE_DIR = Path(os.environ.get("ARENA_LOCALES", HERE / "locales"))
+LANG_ORDER = ["zh", "en", "ja"]  # order of the language switch; other files are appended alphabetically
+
+
+def load_locales():
+    found = {}
+    for f in sorted(LOCALE_DIR.glob("*.json")):
+        try:
+            found[f.stem] = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"[locales] skipped {f.name}: {e}", file=sys.stderr)
+    if "en" not in found:
+        sys.exit(f"AI Arena: {LOCALE_DIR / 'en.json'} is missing. Keep the locales folder next to arena.py.")
+    return found
+
+
+LOCALES = load_locales()
+LANGS = [c for c in LANG_ORDER if c in LOCALES] + sorted(c for c in LOCALES if c not in LANG_ORDER)
+PH_RE = re.compile(r"(?<!\{)\{(\w+)\}(?!\})")  # {name} placeholders; {{name}} is left alone
+
+
+def norm_lang(value):
+    v = (value or "").strip().lower()
+    return next((c for c in LANGS if v == c or v.startswith(c + "-")), "en")
+
+
+def loc(lang, section, key, default=None):
+    for code in (lang, "en"):
+        val = LOCALES.get(code, {}).get(section, {}).get(key)
+        if val is not None:
+            return val
+    return default
+
+
+def fmt(text, **kw):
+    return PH_RE.sub(lambda m: str(kw[m.group(1)]) if m.group(1) in kw else m.group(0), text)
 
 
 def M(lang, key, **kw):
-    zh, en = MSG[key]
-    return (en if lang == "en" else zh).format(**kw)
+    """Backend message (process log, errors) in the given language."""
+    return fmt(loc(lang, "msg", key, key), **kw)
+
+
+def MT(lang, key, **kw):
+    """Text sent to the models (instructions, attachment and history templates)."""
+    return fmt(loc(lang, "model", key, ""), **kw)
+
+
+def parse_words(key):
+    """A parse token (e.g. the word for "Answer") from every language, for reading model output."""
+    out = []
+    for d in LOCALES.values():
+        v = d.get("parse", {}).get(key)
+        out += v if isinstance(v, list) else [v] if v else []
+    return list(dict.fromkeys(out))
+
+
+def tool_text(lang, name, spec, field):
+    """A tool's sign-in hint or default model label: the language file first, then the config."""
+    return (loc(lang, "tools", name) or {}).get(field) or spec.get(field) or ""
+
 
 
 def load_cfg():
@@ -292,7 +299,7 @@ def parse_models(text):
             if rest.startswith("(") and rest.endswith(")"):
                 rest = rest[1:-1].strip()
             rest = re.sub(r"\s{2,}.*$", "", rest)  # drop trailing table columns (such as quota notes)
-            if rest.lower().strip("()[] ") in ("default", "current", "selected", "active", "默认", "当前"):
+            if rest.lower().strip("()[] ") in {w.lower() for w in parse_words("default_words")}:
                 rest = ""
             models.append({"id": m.group(1), "label": rest or m.group(1)})
             continue
@@ -397,7 +404,7 @@ def which(exe):
 JOBS = {}  # install jobs: tool -> {"running", "ok", "log"}
 
 
-def doctor(lang="zh"):
+def doctor(lang="en"):
     global PATH_CACHE
     PATH_CACHE = search_path()
     cfg, res = load_cfg(), {}
@@ -418,8 +425,7 @@ def doctor(lang="zh"):
             except Exception:
                 ver = M(lang, "detect_timeout")
         res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""), "install": bool(spec.get("package") or spec.get("install_script")),
-                     "login": spec.get("login") or "", "hint": spec.get("hint") or "",
-                     "hint_en": spec.get("hint_en") or spec.get("hint") or ""}
+                     "login": spec.get("login") or "", "hint": tool_text(lang, name, spec, "hint")}
 
     names = enabled_tools(cfg) + ([judge_tool(cfg)] if judge_tool(cfg) else [])
     ths = [threading.Thread(target=check, args=(n, cfg["tools"][n])) for n in names]
@@ -446,7 +452,7 @@ def node_version(node):
         return 0, ""
 
 
-def ensure_node(log, lang="zh"):
+def ensure_node(log, lang="en"):
     """Return the npm to use: a downloaded standalone Node first, the system Node if it is >= 20, otherwise download Node 22."""
     if (NODE_DIR / "bin" / "npm").exists():
         return str(NODE_DIR / "bin" / "npm")
@@ -493,7 +499,7 @@ def ensure_node(log, lang="zh"):
     return str(NODE_DIR / "bin" / "npm")
 
 
-def start_install(tool, lang="zh"):
+def start_install(tool, lang="en"):
     spec = load_cfg()["tools"].get(tool) or {}
     pkg, script = spec.get("package"), spec.get("install_script")
     if not pkg and not script:
@@ -542,7 +548,7 @@ def start_install(tool, lang="zh"):
     return ""
 
 
-def open_login(tool, lang="zh"):
+def open_login(tool, lang="en"):
     spec = load_cfg()["tools"].get(tool) or {}
     cmd = spec.get("login")
     if not cmd:
@@ -550,7 +556,7 @@ def open_login(tool, lang="zh"):
     if sys.platform != "darwin":
         return M(lang, "login_manual", cmd=cmd)
     script = Path(tempfile.gettempdir()) / f"arena-login-{tool}.command"
-    hint = (spec.get("hint_en") if lang == "en" else None) or spec.get("hint", "")
+    hint = tool_text(lang, tool, spec, "hint")
     title, done = M(lang, "login_title", tool=tool, hint=hint), M(lang, "login_done")
     script.write_text(f"#!/bin/bash\nexport PATH={shlex.quote(PATH_CACHE)}\necho {shlex.quote(title)}\n"
                       f"echo\n{cmd}\necho\necho {shlex.quote(done)}\n", encoding="utf-8")
@@ -593,7 +599,14 @@ def migrate(c):  # add missing columns to older databases
             c.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER DEFAULT 0")
     if "seed" not in [r[1] for r in c.execute("PRAGMA table_info(prompts)")]:
         c.execute("ALTER TABLE prompts ADD COLUMN seed TEXT DEFAULT ''")
+    # Older versions stored some statuses as Chinese words; convert them to the English codes used now.
+    for old, new in LEGACY_STATUS.items():
+        c.execute("UPDATE outputs SET status=? WHERE status=?", (new, old))
     c.commit()
+
+
+LEGACY_STATUS = {"\u672a\u5b89\u88c5": "not_installed", "\u542f\u52a8\u5931\u8d25": "start_failed",
+                 "\u8d85\u65f6": "timeout", "\u5df2\u53d6\u6d88": "canceled", "\u5df2\u4e2d\u65ad": "interrupted"}
 
 
 def q(sql, args=(), one=False):
@@ -609,141 +622,14 @@ def q(sql, args=(), one=False):
 
 
 # ---------------- Prompt library ----------------
-# built-in prompts: key, (Chinese category, title, text), (English category, title, text)
-SEED_CATALOG = [
-    # ---- Learning ----
-    ("explain", ("学习", "解释一个概念", "用通俗的语言解释「{{概念}}」：它是什么、为什么重要、一个具体例子，以及常见的误解。"),
-     ("Learning", "Explain a concept", "Explain {{concept}} in plain language: what it is, why it matters, a concrete example, and common misconceptions.")),
-    ("three-levels", ("学习", "由浅入深讲一遍", "分三个层次讲解「{{主题}}」：先用一个十岁孩子能听懂的比喻，再给大学水平的解释，最后讲专业人士关心的细节和争议。"),
-     ("Learning", "Three levels deep", "Explain {{topic}} at three levels: an analogy a ten-year-old would get, a university-level explanation, then the details and debates experts care about.")),
-    ("concept-diff", ("学习", "概念辨析", "「{{概念 A}}」和「{{概念 B}}」有什么区别和联系？用一张对比表说明定义、适用场景和典型例子，再指出最容易混淆的地方。"),
-     ("Learning", "Tell two concepts apart", "How do {{concept A}} and {{concept B}} differ, and how are they related? Use a comparison table for definition, where each applies and a typical example, then point out where people most often confuse them.")),
-    ("learning-plan", ("学习", "学习计划", "我想在 {{时间}} 内学会 {{技能}}，现在的水平是 {{现在的水平}}，每天能投入 {{每天时间}}。请按周给我一个学习计划：每周目标、具体练习、推荐资源，以及怎么检验自己真的学会了。"),
-     ("Learning", "Study plan", "I want to learn {{skill}} in {{time frame}}. My current level is {{current level}} and I can spend {{time per day}} a day. Give me a week-by-week plan: goals, concrete exercises, recommended resources, and how to check that I have really learned it.")),
-    ("quiz-me", ("学习", "出题考我", "围绕「{{主题}}」给我出 10 道由易到难的题，选择题和简答题都要有。先只列题目，等我作答后再批改并讲解。"),
-     ("Learning", "Quiz me", "Write 10 questions on {{topic}}, from easy to hard, mixing multiple choice and short answer. List only the questions first; after I answer, mark them and explain.")),
-    ("background", ("学习", "来龙去脉", "讲讲「{{事件或思想}}」的来龙去脉：时代背景、关键人物和转折点、不同学派或立场的主要观点，以及它对今天的影响。最后推荐几本值得读的书。"),
-     ("Learning", "Background and history", "Walk me through the story of {{event or idea}}: the context, key people and turning points, the main schools of thought or positions, and its influence today. End with a few books worth reading.")),
+SEED_KEYS = list(LOCALES["en"].get("prompts", {}))  # catalog order comes from locales/en.json
 
-    # ---- Writing ----
-    ("polish", ("写作", "润色文字", "润色下面这段文字：保持原意和语气，让表达更清楚、简洁、自然。先给出修改后的版本，再列出主要改动和理由。\n\n{{粘贴文字}}"),
-     ("Writing", "Polish text", "Polish the text below. Keep the meaning and tone, and make it clearer, shorter and more natural. Give the revised version first, then list the main changes and why.\n\n{{paste text}}")),
-    ("email", ("写作", "写邮件", "帮我写一封邮件给 {{收件人}}，目的是 {{目的}}。语气 {{正式 / 友好 / 简洁}}，控制在 200 字以内，并给一个主题行。要点：\n{{要点}}"),
-     ("Writing", "Write an email", "Write an email to {{recipient}} to {{purpose}}. Tone: {{formal / friendly / brief}}. Keep it under 150 words and include a subject line. Key points:\n{{key points}}")),
-    ("rewrite-audience", ("写作", "改写给不同读者", "把下面的内容改写给 {{目标读者}} 看：去掉他们不需要的术语，补上他们需要的背景，篇幅控制在 {{字数}} 字左右。\n\n{{粘贴内容}}"),
-     ("Writing", "Rewrite for an audience", "Rewrite the content below for {{audience}}: drop jargon they don't need, add the background they do, and keep it to about {{length}} words.\n\n{{paste content}}")),
-    ("outline", ("写作", "文章大纲", "为一篇关于「{{主题}}」的文章写大纲，读者是 {{读者}}。给出 3 个备选标题、各部分小标题和每部分要讲的要点，再写出第一段。"),
-     ("Writing", "Article outline", "Outline an article about {{topic}} for {{readers}}. Give 3 title options, section headings with the points each section covers, and write the opening paragraph.")),
-    ("titles", ("写作", "起标题", "为下面的内容想 10 个标题，分成稳重、吸引眼球、提问式三种风格，并说明你最推荐哪一个以及原因。\n\n{{内容概要}}"),
-     ("Writing", "Headline ideas", "Suggest 10 headlines for the content below in three styles: straightforward, attention-grabbing and question-based. Say which one you recommend and why.\n\n{{content summary}}")),
-    ("strict-editor", ("写作", "严格编辑挑毛病", "像一位严格的编辑那样审读下面的文字：指出逻辑漏洞、论据不足、啰嗦和含糊的地方，按重要程度排序，每条给出修改建议。\n\n{{粘贴文字}}"),
-     ("Writing", "Strict editor's review", "Review the text below like a strict editor: point out logical gaps, weak evidence, wordiness and vague spots, ranked by importance, each with a suggested fix.\n\n{{paste text}}")),
 
-    # ---- Coding ----
-    ("code-review", ("编程", "代码审查", "审查下面的代码，按严重程度列出问题（bug、安全、性能、可读性），每条给出修改建议和示例代码：\n\n{{粘贴代码}}"),
-     ("Coding", "Code review", "Review the code below. List issues by severity (bugs, security, performance, readability), each with a suggested fix and example code:\n\n{{paste code}}")),
-    ("explain-code", ("编程", "解释代码", "逐段解释下面的代码在做什么、为什么这样写，指出其中隐含的假设和可能出问题的边界情况。\n\n{{粘贴代码}}"),
-     ("Coding", "Explain code", "Explain the code below section by section: what it does and why it is written this way. Point out hidden assumptions and edge cases where it could break.\n\n{{paste code}}")),
-    ("debug", ("编程", "排查报错", "我遇到了这个错误：\n{{错误信息}}\n\n相关代码：\n{{代码}}\n\n环境：{{语言 / 框架 / 版本}}。请按可能性列出原因，每个原因给出验证方法和修复办法。"),
-     ("Coding", "Debug an error", "I'm getting this error:\n{{error message}}\n\nRelevant code:\n{{code}}\n\nEnvironment: {{language / framework / version}}. List the likely causes from most to least likely, each with a way to confirm it and a fix.")),
-    ("unit-tests", ("编程", "写单元测试", "为下面的函数写单元测试，覆盖正常情况、边界情况和错误输入，使用 {{测试框架}}，并说明每个测试在验证什么。\n\n{{粘贴代码}}"),
-     ("Coding", "Write unit tests", "Write unit tests for the function below using {{test framework}}. Cover normal cases, edge cases and bad input, and say what each test checks.\n\n{{paste code}}")),
-    ("refactor", ("编程", "重构代码", "在不改变行为的前提下重构下面的代码，目标是提升 {{可读性 / 性能 / 可测试性}}。给出重构后的代码，并说明每处改动的理由。\n\n{{粘贴代码}}"),
-     ("Coding", "Refactor code", "Refactor the code below without changing its behavior, aiming for better {{readability / performance / testability}}. Show the result and explain each change.\n\n{{paste code}}")),
-    ("tech-choice", ("编程", "技术选型", "我要做 {{项目描述}}，在 {{选项 A}}、{{选项 B}}、{{选项 C}} 之间选择。请从学习成本、性能、生态、维护成本和团队情况比较，给出推荐。团队情况：{{团队情况}}"),
-     ("Coding", "Choose a technology", "I'm building {{project}} and choosing between {{option A}}, {{option B}} and {{option C}}. Compare learning curve, performance, ecosystem, maintenance cost and fit with my team, then recommend one. Team: {{team details}}")),
-    ("sql", ("编程", "写 SQL", "表结构如下：\n{{表结构}}\n\n请写一条 SQL：{{需求}}。说明思路，并指出需要建哪些索引才能跑得快。"),
-     ("Coding", "Write SQL", "Here is the schema:\n{{schema}}\n\nWrite a SQL query that {{requirement}}. Explain the approach and which indexes it needs to run fast.")),
-    ("regex", ("编程", "正则表达式", "写一个正则表达式，匹配 {{要匹配的内容}}，不匹配 {{不该匹配的内容}}。逐段解释，并给出 5 个应该匹配和 5 个不应该匹配的测试例子。"),
-     ("Coding", "Regular expression", "Write a regular expression that matches {{what to match}} but not {{what to exclude}}. Explain it piece by piece and give 5 strings that should match and 5 that should not.")),
-    ("system-design", ("编程", "系统设计", "设计一个 {{系统}}，预计规模是 {{用户量 / 请求量}}。给出架构（用文字描述）、核心组件、数据模型、关键取舍，以及规模扩大十倍时需要改什么。"),
-     ("Coding", "System design", "Design {{system}} for {{users / requests}}. Describe the architecture, core components, data model and key trade-offs, and what would change at ten times the scale.")),
+def seed_text(lang, key):
+    """(category, title, text) of a built-in prompt in the given language."""
+    return tuple(loc(lang, "prompts", key) or ("", key, ""))
 
-    # ---- Decisions ----
-    ("compare-options", ("决策", "方案对比", "比较 {{方案 A}} 和 {{方案 B}}：分别适合什么场景、优缺点、成本和风险。最后给出你的推荐和理由。"),
-     ("Decisions", "Compare two options", "Compare {{option A}} and {{option B}}: where each fits, pros and cons, cost and risk. End with your recommendation and why.")),
-    ("decide", ("决策", "帮我做决定", "我在考虑 {{决定}}。我的情况：{{背景}}。请列出支持和反对的理由、关键的不确定因素、最坏情况和应对办法，最后给出你的建议，以及什么情况下应该改变主意。"),
-     ("Decisions", "Help me decide", "I'm considering {{decision}}. My situation: {{background}}. List the reasons for and against, the key uncertainties, the worst case and how I'd handle it. Then give your advice and what would make you change your mind.")),
-    ("premortem", ("决策", "事前验尸", "假设一年后「{{计划}}」彻底失败了。请列出最可能导致失败的 8 个原因，按可能性和影响排序，每个原因给出现在就能做的预防措施。"),
-     ("Decisions", "Pre-mortem", "Imagine that a year from now {{plan}} has failed completely. List the 8 most likely reasons, ranked by likelihood and impact, each with something I can do now to prevent it.")),
-    ("devils-advocate", ("决策", "唱反调", "我的观点是：{{你的观点}}。请站在反对者的立场，给出最有力的反驳和证据，然后指出我的观点里最站不住脚的地方。"),
-     ("Decisions", "Devil's advocate", "My view: {{your view}}. Argue the other side as strongly as you can, with evidence, then point out the weakest part of my view.")),
-    ("prioritize", ("决策", "排优先级", "下面是我手头的任务。请按重要和紧急程度排优先级并说明理由，再建议哪些可以推迟、交给别人或者干脆不做：\n\n{{任务列表}}"),
-     ("Decisions", "Prioritize tasks", "Here are my tasks. Rank them by importance and urgency with reasons, and suggest which to postpone, delegate or drop:\n\n{{task list}}")),
 
-    # ---- Work ----
-    ("meeting-notes", ("工作", "会议纪要", "把下面的会议记录整理成纪要：结论、决定事项、行动项（负责人和截止日期）、待定问题。\n\n{{粘贴记录}}"),
-     ("Work", "Meeting notes", "Turn the notes below into meeting minutes: conclusions, decisions, action items (owner and due date) and open questions.\n\n{{paste notes}}")),
-    ("weekly-report", ("工作", "写周报", "根据下面的工作记录写一份周报：本周完成、关键数据、遇到的问题、下周计划。语言简洁，读者是 {{读者}}。\n\n{{工作记录}}"),
-     ("Work", "Weekly report", "Write a weekly report from the notes below: done this week, key numbers, problems, plan for next week. Keep it brief; the reader is {{reader}}.\n\n{{work notes}}")),
-    ("exec-summary", ("工作", "给管理层的一页汇报", "把下面的内容浓缩成给管理层的一页汇报：一句话结论、三个要点、需要对方做的决定或提供的支持。\n\n{{内容}}"),
-     ("Work", "One-page executive brief", "Condense the content below into a one-page brief for leadership: a one-sentence conclusion, three key points, and the decision or support you need from them.\n\n{{content}}")),
-    ("project-plan", ("工作", "项目计划", "为「{{项目}}」制定计划：目标和成功标准、里程碑和时间表、需要的资源、主要风险和应对办法。截止日期是 {{日期}}。"),
-     ("Work", "Project plan", "Draft a plan for {{project}}: goals and success criteria, milestones and timeline, resources needed, and the main risks with mitigations. The deadline is {{date}}.")),
-    ("feedback", ("工作", "写反馈", "帮我给 {{对象}} 写一段反馈。具体情况：{{情况}}。要具体、对事不对人：先说做得好的地方，再说需要改进的地方和建议。"),
-     ("Work", "Give feedback", "Help me write feedback for {{person}}. Situation: {{situation}}. Be specific and focus on the work, not the person: start with what went well, then what to improve and how.")),
-    ("interview-prep", ("工作", "面试准备", "我要面试 {{职位}}，公司是 {{公司}}。请列出 10 个最可能被问到的问题（技术和行为类各一半），每题给出回答思路和要点，再给我 3 个可以反问面试官的问题。"),
-     ("Work", "Interview prep", "I'm interviewing for {{role}} at {{company}}. List the 10 most likely questions (half technical, half behavioral), with how to approach each and key points, plus 3 questions I can ask the interviewer.")),
-
-    # ---- Research ----
-    ("research-state", ("研究", "研究现状", "总结「{{主题}}」的研究现状：主要流派和代表人物、关键研究和结论、仍有争议或没有定论的问题。区分已有共识和个别研究的发现，并推荐进一步阅读的资料。"),
-     ("Research", "State of research", "Summarize the state of research on {{topic}}: main schools and leading figures, key studies and findings, and open or disputed questions. Separate established consensus from single-study findings, and suggest further reading.")),
-    ("market", ("研究", "市场分析", "分析 {{市场或行业}}：市场规模和增长、主要玩家及各自优势、用户需求、趋势和风险。标出哪些数字需要进一步核实。"),
-     ("Research", "Market analysis", "Analyze {{market or industry}}: size and growth, main players and their strengths, customer needs, trends and risks. Flag which numbers need checking.")),
-    ("competitors", ("研究", "竞品对比", "比较 {{产品 A}}、{{产品 B}}、{{产品 C}}：定位、核心功能、定价、优缺点、适合的用户。用表格呈现，最后给出选择建议。"),
-     ("Research", "Compare products", "Compare {{product A}}, {{product B}} and {{product C}}: positioning, core features, pricing, pros and cons, and who each suits. Use a table and end with a recommendation.")),
-    ("summarize-article", ("研究", "文章摘要与评价", "用三句话概括下面文章的核心观点，再列出它的主要论据和证据，最后评价论证是否可靠、有没有遗漏的反方观点。\n\n{{粘贴文章}}"),
-     ("Research", "Summarize and assess an article", "Summarize the article below in three sentences, list its main arguments and evidence, then judge whether the reasoning holds up and which opposing views it leaves out.\n\n{{paste article}}")),
-
-    # ---- Fact-check ----
-    ("fact-check", ("核查", "事实核查", "核查下面这段话里的事实和数字，逐条标出正确、错误或无法确认，并说明依据：\n\n{{粘贴内容}}"),
-     ("Fact-check", "Fact-check", "Fact-check the text below. Mark each claim or number as correct, wrong or unverifiable, and explain why:\n\n{{paste text}}")),
-    ("credibility", ("核查", "判断说法是否可信", "我看到这样一个说法：「{{说法}}」。请评估它的可信度：可能的出处、支持和反对的证据、常见的误传版本，以及我自己可以怎样核实。"),
-     ("Fact-check", "Is this claim credible?", "I came across this claim: \"{{claim}}\". Assess how credible it is: likely sources, evidence for and against, common distorted versions, and how I can check it myself.")),
-    ("check-math", ("核查", "核对计算", "检查下面的计算和推理是否正确：逐步重新计算，指出错误，并给出正确结果。\n\n{{粘贴内容}}"),
-     ("Fact-check", "Check the math", "Check the calculation and reasoning below: redo it step by step, point out any errors, and give the correct result.\n\n{{paste content}}")),
-
-    # ---- Follow-up (for second rounds, together with "Include the other answers") ----
-    ("compare-answers", ("追问", "对比几个回答", "比较上一轮几个模型的回答：哪些结论一致、哪些互相矛盾、谁的论据更可靠。最后综合出一个最好的答案。"),
-     ("Follow-up", "Compare the answers", "Compare the models' answers from the last round: where they agree, where they contradict each other, and whose reasoning is stronger. Then combine them into the best answer.")),
-    ("find-gaps", ("追问", "补充遗漏", "上一轮的回答有没有遗漏重要的情况、风险或反例？请补充，并说明它们会怎样改变结论。"),
-     ("Follow-up", "What was missed?", "Did the last answers miss any important cases, risks or counterexamples? Add them and explain how they change the conclusion.")),
-    ("more-concrete", ("追问", "讲得更具体", "把上面的回答讲得更具体：给出可以直接照着做的步骤、具体的数字，以及一个完整的例子。"),
-     ("Follow-up", "Make it concrete", "Make the answer above more concrete: steps I can follow directly, specific numbers, and one complete worked example.")),
-
-    # ---- Documents (for use with attachments) ----
-    ("summarize-attachments", ("文档", "总结附件", "总结附件的要点：先用三句话给出结论，再列出关键数据，以及需要我做决定的事项。"),
-     ("Documents", "Summarize attachments", "Summarize the attachments: give the conclusion in three sentences, then the key figures and any decisions I need to make.")),
-    ("doc-qa", ("文档", "只根据附件回答", "只根据附件内容回答：{{问题}}。引用原文支持你的回答；附件里没有的信息请直接说明，不要推测。"),
-     ("Documents", "Answer from the attachments only", "Answer using only the attachments: {{question}}. Quote the text that supports your answer; if the attachments don't say, tell me instead of guessing.")),
-    ("extract-table", ("文档", "提取数据成表", "从附件中提取 {{要提取的信息}}，整理成表格，并注明每条数据在原文中的位置（页码或章节）。"),
-     ("Documents", "Extract into a table", "Extract {{information to extract}} from the attachments into a table, noting where each item appears (page or section).")),
-    ("analyze-sheet", ("文档", "分析表格数据", "分析附件中的表格数据：概括整体情况，找出趋势和异常值，给出 3 个最值得关注的发现，并建议下一步可以做哪些分析。"),
-     ("Documents", "Analyze spreadsheet data", "Analyze the spreadsheet in the attachments: give an overview, find trends and outliers, list the 3 most important findings, and suggest what to analyze next.")),
-    ("contract", ("文档", "合同要点", "阅读附件中的合同，列出：双方的主要义务、付款和期限、违约责任、终止条款，以及对我不利或需要注意的条款。（这不能代替律师意见。）"),
-     ("Documents", "Contract key points", "Read the contract in the attachments and list: each party's main obligations, payment and deadlines, liability for breach, termination terms, and clauses that are unfavorable to me or need attention. (This is not a substitute for legal advice.)")),
-
-    # ---- Translation ----
-    ("translate", ("翻译", "翻译", "把下面的内容翻译成 {{目标语言}}，保持原意和语气，术语前后一致。遇到有多种译法或文化差异的地方，在译文后简要说明。\n\n{{粘贴内容}}"),
-     ("Translation", "Translate", "Translate the text below into {{target language}}, keeping the meaning and tone and using terms consistently. Where there are several possible renderings or cultural differences, add a short note after the translation.\n\n{{paste text}}")),
-    ("ja-business-email", ("翻译", "日语商务邮件", "把下面的意思写成一封得体的日语商务邮件（敬语使用恰当），并附上中文对照：\n\n{{要表达的意思}}"),
-     ("Translation", "Japanese business email", "Write a polite Japanese business email (with appropriate keigo) that says the following, with an English version alongside:\n\n{{what to say}}")),
-
-    # ---- Life ----
-    ("travel", ("生活", "旅行计划", "帮我规划 {{目的地}} {{天数}} 天的行程。同行：{{人数和同行者}}，预算：{{预算}}，偏好：{{偏好}}。按天列出安排、交通方式、住宿区域建议和注意事项。"),
-     ("Life", "Trip plan", "Plan a {{number of days}}-day trip to {{destination}}. Travelers: {{who is going}}. Budget: {{budget}}. Preferences: {{preferences}}. Give a day-by-day plan, how to get around, where to stay, and things to watch out for.")),
-    ("buying-advice", ("生活", "购买建议", "我想买 {{产品类型}}，预算 {{预算}}，主要用途是 {{用途}}。请说明选购时最重要的几个参数，推荐几款并做比较，最后给出你的选择。"),
-     ("Life", "Buying advice", "I want to buy {{product type}} for {{main use}}, budget {{budget}}. Explain the specs that matter most, compare a few models, and tell me which you'd pick.")),
-    ("gift", ("生活", "送礼建议", "给 {{对象}} 选礼物，场合是 {{场合}}，预算 {{预算}}，对方喜欢 {{兴趣}}。给出 8 个建议并说明理由，分成稳妥和有新意两类。"),
-     ("Life", "Gift ideas", "Suggest gifts for {{person}} for {{occasion}}, budget {{budget}}; they like {{interests}}. Give 8 ideas with reasons, split into safe choices and more original ones.")),
-
-    # ---- Prompting ----
-    ("improve-prompt", ("提示词", "优化 prompt", "帮我改进下面这个 prompt，让 AI 的回答更准确、更符合我的需要。先指出它的问题，再给出改写后的版本：\n\n{{原 prompt}}"),
-     ("Prompting", "Improve a prompt", "Improve the prompt below so the AI's answer is more accurate and closer to what I need. Point out its problems first, then give the rewritten version:\n\n{{original prompt}}")),
-    ("system-prompt", ("提示词", "写系统提示词", "帮我为一个用于 {{用途}} 的 AI 助手写系统提示词：说明它的角色、目标用户、回答风格、必须遵守的规则和不该做的事，并给出两段示例对话。"),
-     ("Prompting", "Write a system prompt", "Write a system prompt for an AI assistant used for {{purpose}}: its role, target users, answer style, rules it must follow and things it must not do, plus two example conversations.")),
-]
-SEED_BY_KEY = {k: (zh, en) for k, zh, en in SEED_CATALOG}
 SEED_BASE_TIME = 1_000_000_000  # built-in prompts sort after the user's own prompts, in catalog order
 
 
@@ -753,10 +639,11 @@ def _seeded():
 
 
 def _add_seeds(keys):
-    for i, (k, zh, en) in enumerate(SEED_CATALOG):
+    for i, k in enumerate(SEED_KEYS):
         if k in keys:
+            cat, title, body = seed_text("en", k)
             q("INSERT INTO prompts(id, title, body, category, created_at, updated_at, seed) VALUES(?,?,?,?,?,?,?)",
-              (uuid.uuid4().hex[:12], zh[1], zh[2], zh[0], SEED_BASE_TIME - i, SEED_BASE_TIME - i, k))
+              (uuid.uuid4().hex[:12], title, body, cat, SEED_BASE_TIME - i, SEED_BASE_TIME - i, k))
 
 
 def ensure_seeds(restore=False):
@@ -766,26 +653,25 @@ def ensure_seeds(restore=False):
         if not seeded and q("SELECT v FROM settings WHERE k='prompts_seeded'", one=True):
             # the 5 examples added by the previous version have no seed key: recognize them by content and tag them
             for row in q("SELECT id, title, body FROM prompts WHERE seed=''"):
-                for i, (k, zh, en) in enumerate(SEED_CATALOG):
-                    if (row["title"], row["body"]) in ((zh[1], zh[2]), (en[1], en[2])):
+                for i, k in enumerate(SEED_KEYS):
+                    if (row["title"], row["body"]) in {seed_text(c, k)[1:] for c in LANGS}:
                         q("UPDATE prompts SET seed=?, created_at=?, updated_at=? WHERE id=?",
                           (k, SEED_BASE_TIME - i, SEED_BASE_TIME - i, row["id"]))
                         seeded.add(k)
             seeded |= {"explain", "compare-options", "code-review", "summarize-attachments", "fact-check"}
         present = {r["seed"] for r in q("SELECT seed FROM prompts WHERE seed<>''")}
-        todo = {k for k in SEED_BY_KEY if k not in present and (restore or k not in seeded)}
+        todo = {k for k in SEED_KEYS if k not in present and (restore or k not in seeded)}
         _add_seeds(todo)
         q("INSERT OR REPLACE INTO settings(k, v) VALUES('prompt_seeds', ?)", (json.dumps(sorted(seeded | todo)),))
         return len(todo)
 
 
-def list_prompts(lang="zh"):
+def list_prompts(lang="en"):
     ensure_seeds()
     rows = q("SELECT * FROM prompts ORDER BY pinned DESC, created_at DESC")
     for r in rows:  # built-in prompts are shown in the interface language
-        if r.get("seed") in SEED_BY_KEY:
-            zh, en = SEED_BY_KEY[r["seed"]]
-            r["category"], r["title"], r["body"] = en if lang == "en" else zh
+        if r.get("seed") in SEED_KEYS:
+            r["category"], r["title"], r["body"] = seed_text(lang, r["seed"])
     return rows
 
 
@@ -815,7 +701,7 @@ class Run:
         self.id, self.events, self.cond = rid, [], threading.Condition()
         self.pending, self.procs = set(tools), {}
         self.cancelled, self.finished_at = False, None
-        self.judge, self.judge_model, self.lang = False, "", "zh"
+        self.judge, self.judge_model, self.lang = False, "", "en"
 
     def emit(self, ev):
         with self.cond:
@@ -888,7 +774,7 @@ class ClaudeStream:
 
 
 class LineParser:
-    def __init__(self, lang="zh"):
+    def __init__(self, lang="en"):
         self.buf, self.lang = "", lang
 
     def feed(self, chunk):
@@ -917,7 +803,7 @@ class LineParser:
 class CodexJson(LineParser):
     """Parse the JSONL from `codex exec --json` (thread.started / item.* / turn.*)."""
 
-    def __init__(self, lang="zh"):
+    def __init__(self, lang="en"):
         super().__init__(lang)
         self.sent, self.any_out = {}, False
 
@@ -977,7 +863,7 @@ class AgyStream(LineParser):
     Documented field locations are tried first, then a recursive search over the whole event; if still no text
     is found, the raw output is written to the process log."""
 
-    def __init__(self, lang="zh"):
+    def __init__(self, lang="en"):
         super().__init__(lang)
         self.got, self.raw, self.out_any = False, [], False
 
@@ -1031,24 +917,9 @@ class AgyStream(LineParser):
         return res
 
 
-PARSERS = {"claude_stream": lambda lang="zh": ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
+PARSERS = {"claude_stream": lambda lang="en": ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
 
 
-CHAT_PREFIX = {
-    "zh": ("请像通用 AI 助手（而不是编程助手）那样回答下面的问题：给出完整、有结构、可以直接照着做的回答，"
-           "需要时用标题、列表或表格。如果问的是建议、计划或方案，先直接给出推荐，再给一个足以照着执行的具体例子，"
-           "按需要写清步骤、数量或范围、可替换的选项，以及什么情况下怎么调整。缺少个人信息时，说明你假设的前提和适用范围。"
-           "提问者指定了篇幅就按要求来；简单的事实问题简短回答即可。"
-           "除了查看下面列出的附件，不要读写本地文件，也不要执行命令，除非问题确实需要。用提问所用的语言回答。\n\n"),
-    "en": ("Answer the question below the way a general-purpose AI assistant would, not as a coding agent: give a complete, "
-           "well-structured answer the person can act on, using headings, lists or tables where they help. For advice, a plan "
-           "or a proposal, give your recommendation first, then a concrete example detailed enough to follow, with steps, "
-           "quantities or ranges, alternatives and how to adjust them as relevant. If personal details are missing, state your "
-           "assumptions and who the answer suits. Follow any length the person asks for, and keep simple factual answers short. "
-           "Apart from viewing the attachments listed below, do not read or write local files or run commands unless the "
-           "question really needs it. Answer in the language of the question.\n\n"),
-}
-Q_LABEL = {"zh": "问题：\n", "en": "Question:\n"}
 
 # ---------------- Attachments ----------------
 MAX_UPLOAD_MB = 50
@@ -1256,37 +1127,23 @@ def attachment_block(metas, lang, budget=TOTAL_CHARS, per_file=FILE_CHARS, with_
     """Build one block of text from the attachments: the extracted content plus the original file paths (tools may open them read-only)."""
     if not metas:
         return ""
-    en = lang == "en"
-    if with_paths:
-        intro = (f"Attached files ({len(metas)}). Their text content is included below. The original files are saved on this "
-                 "computer; open them read-only if you need images, charts, formulas or layout that the text does not capture." if en
-                 else f"附件（共 {len(metas)} 个）。下面是从附件里提取的文字内容。原文件保存在本机，"
-                      "如果需要看图片、图表、公式或排版这类文字里没有的信息，可以只读打开原文件。")
-    else:
-        intro = (f"Attached files ({len(metas)}), text content only:" if en else f"附件（共 {len(metas)} 个），只含提取出的文字：")
-    lines = [intro, ""]
+    lines = [MT(lang, "attach_intro_paths" if with_paths else "attach_intro_text", n=len(metas)), ""]
     left = budget
     for i, m in enumerate(metas, 1):
-        head = (f"[Attachment {i}: {m['name']} ({m['kind']}, {m['chars']:,} characters)]" if en
-                else f"【附件 {i}：{m['name']}（{m['kind']}，约 {m['chars']:,} 字）】")
-        lines.append(head)
+        lines.append(MT(lang, "attach_header", i=i, name=m["name"], kind=m["kind"], chars=f"{m['chars']:,}"))
         if with_paths and m.get("path"):
-            lines.append(("Path: " if en else "路径：") + m["path"])
+            lines.append(MT(lang, "attach_path") + m["path"])
         text = ""
         try:
             text = (Path(m["path"]).parent / "_text.txt").read_text(encoding="utf-8")
         except Exception:
             pass
         if not text:
-            lines.append(("(No text could be extracted. Open the original file to view it.)" if en
-                          else "（无法提取文字，请直接打开原文件查看。）") if with_paths else
-                         ("(No text could be extracted, e.g. an image.)" if en else "（没有可提取的文字，比如图片。）"))
+            lines.append(MT(lang, "attach_no_text_paths" if with_paths else "attach_no_text"))
         else:
             cap = max(0, min(per_file, left))
             if len(text) > cap:
-                text = text[:cap] + ((f"\n…(only the first {cap:,} characters are included; open the file for the rest)" if en
-                                      else f"\n……（只附了前 {cap:,} 字，其余部分请打开原文件查看）") if with_paths else
-                                     (f"\n…(truncated to the first {cap:,} characters)" if en else f"\n……（只附了前 {cap:,} 字）"))
+                text = text[:cap] + MT(lang, "attach_trunc_paths" if with_paths else "attach_trunc", cap=f"{cap:,}")
             left -= min(len(text), cap)
             lines.append(text)
         lines.append("")
@@ -1325,36 +1182,30 @@ def cleanup_staging(max_age=86400):
 PEER_CHARS, PEERS_TOTAL = 12000, 36000
 
 
-def peer_block(peers, lang="zh"):
+def peer_block(peers, lang="en"):
     """For follow-ups: give the current tool the other models' answers from the previous round (labeled by model) for cross-model comparison."""
     if not peers:
         return ""
-    en = lang == "en"
-    parts = ["For reference, here are the other models' answers to the previous question. Your own previous answer is "
-             "in our conversation history; together they are all the answers from that round.\n" if en
-             else "供参考：下面是其他模型对上一个问题的回答。你自己上一轮的回答在我们的对话记录里，加起来就是上一轮的全部回答。\n"]
+    parts = [MT(lang, "peers_intro")]
     left = PEERS_TOTAL
     for name, text in peers:
         cap = max(2000, min(PEER_CHARS, left))
         text = text.strip()
         if len(text) > cap:
-            text = text[:cap] + ("\n…(truncated)" if en else "\n……（后面省略）")
+            text = text[:cap] + MT(lang, "truncated")
         left -= len(text)
-        parts.append(f"[Answer from {name}]\n{text}\n" if en else f"【{name} 的回答】\n{text}\n")
+        parts.append(MT(lang, "peer_header", name=name) + f"\n{text}\n")
     return "\n".join(parts) + "\n"
 
 
-def build_transcript(history, prompt, lang="zh"):
-    en = lang == "en"
-    parts = ["Below is our conversation so far. Answer the new question at the end with it in mind.\n" if en
-             else "下面是我们之前的对话记录，请在此基础上回答最后的新问题。\n"]
+def build_transcript(history, prompt, lang="en"):
+    parts = [MT(lang, "transcript_intro")]
     for i, (q_, a_) in enumerate(history, 1):
-        a_ = (a_ or ("(no answer)" if en else "（没有回答）")).strip()
+        a_ = (a_ or MT(lang, "no_answer")).strip()
         if len(a_) > 6000:
-            a_ = a_[:6000] + ("\n…(truncated)" if en else "\n……（后面省略）")
-        parts.append(f"[Round {i}: my question]\n{q_}\n\n[Round {i}: your answer]\n{a_}\n" if en
-                     else f"【第 {i} 轮 我的问题】\n{q_}\n\n【第 {i} 轮 你的回答】\n{a_}\n")
-    parts.append(f"[New question]\n{prompt}" if en else f"【新问题】\n{prompt}")
+            a_ = a_[:6000] + MT(lang, "truncated")
+        parts.append(MT(lang, "transcript_round", i=i, q=q_, a=a_))
+    parts.append(MT(lang, "new_question", prompt=prompt))
     return "\n".join(parts)
 
 
@@ -1373,7 +1224,7 @@ MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # e.g. "model: gpt-…
 
 def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False,
               peers=None,
-              attach="", attach_dir=""):
+              attach="", attach_dir="", attach_n=0):
     base, extra, note = list(spec["cmd"]), [], ""
     if attach_dir and cwd and spec.get("add_dir_args"):  # with a working folder set, also allow reading the attachments folder
         extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
@@ -1395,7 +1246,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if rargs and spec.get("resume_pos") == "prompt":  # subcommand form: placed right before the question
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
         base[i:i] = rargs
-    lang = getattr(run, "lang", "zh")
+    lang = getattr(run, "lang", "en")
     if rargs:
         note = M(lang, "resume_native", name=name, sid=session[:12])
     elif history:
@@ -1403,18 +1254,18 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         note = M(lang, "resume_transcript", n=len(history))
     pblock = peer_block(peers, lang)
     if attach or pblock:  # attachment content and the other models' answers go before the question
-        prompt = attach + pblock + Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt
+        prompt = attach + pblock + MT(lang, "question_label") + prompt
     if pblock:
         note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
     uses_openai = spec.get("transport") == "openai_responses"
     if chat and not uses_openai:  # chat mode: instructions are added only when sending to the tool; the stored question stays unchanged
-        prompt = CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]) + (prompt if attach or pblock else Q_LABEL.get(lang, Q_LABEL["zh"]) + prompt)
+        prompt = MT(lang, "chat_prefix") + (prompt if attach or pblock else MT(lang, "question_label") + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     if uses_openai:
         options = ["--lang", lang]
         if chat:
-            options += ["--instructions", CHAT_PREFIX.get(lang, CHAT_PREFIX["zh"]).strip()]
+            options += ["--instructions", MT(lang, "chat_prefix").strip()]
             note += M(lang, "chat_note")
         cmd = [sys.executable, str(HERE / "arena_openai.py"), *options, *cmd[1:-1]]
     shown = " ".join(shlex.quote(a) for a in base)
@@ -1422,8 +1273,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     actual, errhead, sess = [""], [""], [""]
     run.emit({"tool": name, "type": "start", "cmd": shown, "model": model, "effort": effort})
     if attach:
-        note += M(lang, "attach_note", n=attach.count("\n【附件 ") + attach.count("\n[Attachment ") or 1,
-                  chars=f"{len(attach):,}")
+        note += M(lang, "attach_note", n=attach_n or 1, chars=f"{len(attach):,}")
     env = child_env()
     stripped = [k for k in spec.get("strip_env") or [] if env.pop(k, None) is not None]
     if stripped:  # e.g. ANTHROPIC_API_KEY would override the claude.ai subscription sign-in
@@ -1462,10 +1312,10 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
                                  stdin=api_input if uses_openai else subprocess.DEVNULL,
                                  cwd=cwd, env=env, start_new_session=(os.name == "posix"))
     except FileNotFoundError:
-        p, status = None, "未安装"
+        p, status = None, "not_installed"
         log.append(M(lang, "cmd_missing", exe=cmd[0], cfg=CFG_PATH.name))
     except Exception as e:
-        p, status = None, "启动失败"
+        p, status = None, "start_failed"
         log.append(f"{e}\n")
     finally:
         if api_input is not None:
@@ -1522,7 +1372,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         try:
             p.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            status = "超时"
+            status = "timeout"
             kill(p)
             p.wait()
         for th in ths:
@@ -1533,7 +1383,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             except OSError:
                 pass
         if run.cancelled:
-            status = "已取消"
+            status = "canceled"
         elif status == "ok" and p.returncode != 0:
             status = f"exit {p.returncode}"
     secs = round(time.time() - t0, 1)
@@ -1558,82 +1408,20 @@ JUDGING = set()
 JUDGE_KEYS = ("accuracy", "completeness", "clarity", "usefulness")
 
 
-def build_judge_prompt(question, earlier, answers, lang="zh"):
-    if lang == "en":
-        return build_judge_prompt_en(question, earlier, answers)
-    lines = ["你是一位严格、公正的评审。下面是同一个问题的几份匿名回答，标为 A、B、C……，顺序是随机打乱的。",
-             "请只根据内容评审，不要猜测或考虑它们来自哪个模型。不要使用任何工具，不要读写文件。", ""]
+def build_judge_prompt(question, earlier, answers, lang="en"):
+    J = lambda key: loc(lang, "judge", key)
+    lines = list(J("intro")) + [""]
     if earlier:
-        lines.append("这是多轮对话中的一轮。在此之前，提问者依次问过：")
+        lines.append(J("earlier_intro"))
         lines += [f"{i}. {x}" for i, x in enumerate(earlier, 1)]
-        lines += ["（每位回答者都能看到自己之前的对话。）", ""]
-    lines += ["【问题】", question, ""]
+        lines += [J("earlier_note"), ""]
+    lines += [J("question_head"), question, ""]
     for lab, text in answers:
         t = text.strip()
         if len(t) > 12000:
-            t = t[:12000] + "\n……（后面省略）"
-        lines += [f"【回答 {lab}】", t, ""]
-    lines += ["评分标准（每项 1 到 5 分，5 最好）：",
-              "- accuracy 准确性：事实是否正确，有没有错误或编造",
-              "- completeness 完整性：是否覆盖问题的关键方面",
-              "- clarity 清晰度：结构和表达是否清楚易读",
-              "- usefulness 实用性：对提问者是否真正有帮助",
-              "- overall 总分 1 到 5：综合判断，不是简单平均",
-              "",
-              "另外请找出这几份回答的共识和分歧：",
-              "- consensus：几份回答都同意的关键结论，最多 5 条，每条一句话。",
-              "- conflicts：回答之间实质性的分歧，最多 6 条。只列内容上的分歧（事实、数字、结论、建议、做法），"
-              "不要列措辞、篇幅或排版上的差异。没有分歧就给空数组。每条包括：",
-              "  - topic：分歧点，一句话。",
-              "  - kind：fact（事实或数字冲突，至少有一方是错的）、advice（建议或做法不同）、emphasis（侧重或取舍不同）三选一。",
-              "  - positions：每份回答在这一点上的说法，各用一句话概括；没提到就写“未提及”。",
-              "  - verdict：哪种说法更可信、为什么；如果你也无法确定，就说明应该怎么核实。",
-              "",
-              "只输出一个 JSON 对象，不要输出任何其他文字。格式：",
-              '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"一句中文点评"}},'
-              '"best":"A","reason":"一两句中文，说明为什么选它",'
-              '"consensus":["一句话"],'
-              '"conflicts":[{"topic":"一句话","kind":"fact","positions":{"A":"一句话","B":"一句话"},"verdict":"一两句话"}]}',
-              'scores 和每条 positions 里都要包含每一份回答。如果难分高下，best 填 "tie"。']
-    return "\n".join(lines)
-
-
-def build_judge_prompt_en(question, earlier, answers):
-    lines = ["You are a strict, fair reviewer. Below are several anonymous answers to the same question, labeled "
-             "Answer A, Answer B, Answer C…, in random order.",
-             "Judge on content only. Do not guess or consider which model wrote each one. Do not use any tools or read or write files.", ""]
-    if earlier:
-        lines.append("This is one round of a multi-turn conversation. Before this, the user asked, in order:")
-        lines += [f"{i}. {x}" for i, x in enumerate(earlier, 1)]
-        lines += ["(Each answerer can see its own earlier conversation.)", ""]
-    lines += ["[Question]", question, ""]
-    for lab, text in answers:
-        t = text.strip()
-        if len(t) > 12000:
-            t = t[:12000] + "\n…(truncated)"
-        lines += [f"[Answer {lab}]", t, ""]
-    lines += ["Scoring criteria (1 to 5 each, 5 is best):",
-              "- accuracy: are the facts correct, with no errors or fabrication",
-              "- completeness: does it cover the key aspects of the question",
-              "- clarity: is it well structured and easy to read",
-              "- usefulness: does it genuinely help the person who asked",
-              "- overall 1 to 5: your overall judgment, not a simple average",
-              "",
-              "Also find where the answers agree and where they disagree:",
-              "- consensus: key conclusions all answers share, at most 5, one sentence each.",
-              "- conflicts: substantive disagreements between answers, at most 6. List only differences in content (facts, "
-              "numbers, conclusions, advice, approach), not in wording, length or formatting. Use an empty array if there are none. Each has:",
-              "  - topic: the point of disagreement, one sentence.",
-              "  - kind: fact (facts or numbers conflict, so at least one is wrong), advice (different recommendations or approaches) or emphasis (different priorities or trade-offs).",
-              '  - positions: what each answer says on this point, one sentence each; write "not mentioned" if it does not address it.',
-              "  - verdict: which position is more credible and why; if you cannot tell, say how to check.",
-              "",
-              "Output only one JSON object and no other text. Format:",
-              '{"scores":{"A":{"accuracy":4,"completeness":4,"clarity":5,"usefulness":4,"overall":4,"comment":"one-sentence comment in English"}},'
-              '"best":"A","reason":"one or two sentences in English on why it is best",'
-              '"consensus":["one sentence"],'
-              '"conflicts":[{"topic":"one sentence","kind":"fact","positions":{"A":"one sentence","B":"one sentence"},"verdict":"one or two sentences"}]}',
-              'Include every answer in scores and in each positions object. Refer to answers as "Answer A", "Answer B" and so on. If they are too close to call, set best to "tie".']
+            t = t[:12000] + MT(lang, "truncated")
+        lines += [fmt(J("answer_head"), label=lab), t, ""]
+    lines += list(J("criteria")) + ["", J("format_intro"), J("format_example"), J("format_note")]
     return "\n".join(lines)
 
 
@@ -1660,10 +1448,17 @@ def parse_judge(text):
     return None
 
 
+def strip_answer_word(label):
+    """Strip the localized word for "Answer" from a label: 'Answer A' -> 'A'."""
+    for w in parse_words("answer_word"):
+        label = label.replace(w.upper(), "")
+    return label.strip()
+
+
 def norm_conflicts(o, mapping):
     """Clean up the judge's consensus and conflicts, and map the anonymous labels back to tool names."""
     def lab(k):
-        k = str(k).strip().upper().replace("回答", "").replace("ANSWER", "").strip()
+        k = strip_answer_word(str(k).strip().upper())
         return mapping.get(k)
     cons = [str(x).strip() for x in (o.get("consensus") or []) if str(x).strip()][:8] if isinstance(o.get("consensus"), list) else []
     out = []
@@ -1681,7 +1476,7 @@ def norm_conflicts(o, mapping):
     return cons, out
 
 
-def judgment(rid, lang="zh"):
+def judgment(rid, lang="en"):
     j = q("SELECT * FROM judgments WHERE run_id=?", (rid,), one=True)
     if j:
         j["mapping"] = json.loads(j.get("mapping") or "{}")
@@ -1696,7 +1491,7 @@ def judgment(rid, lang="zh"):
     return j
 
 
-def start_judge(rid, model="", lang="zh"):
+def start_judge(rid, model="", lang="en"):
     if rid in JUDGING:
         return M(lang, "judge_busy")
     cfg = load_cfg()
@@ -1724,8 +1519,7 @@ def start_judge(rid, model="", lang="zh"):
     prompt = build_judge_prompt(run["prompt"], earlier, [(labels[i], o["output"]) for i, o in enumerate(outs)], lang)
     metas = json.loads(run.get("attachments") or "[]")
     if metas:  # give the judge the attachment content too, to check the answers' understanding of it
-        prompt = (("The question came with attachments. Their text is below for checking the answers.\n\n" if lang == "en"
-                   else "提问时附带了附件，下面是附件的文字内容，供你核对回答是否准确。\n\n")
+        prompt = (MT(lang, "judge_attach_intro")
                   + attachment_block(metas, lang, budget=40000, per_file=20000, with_paths=False) + prompt)
     q("DELETE FROM judge_scores WHERE run_id=?", (rid,))
     q("INSERT OR REPLACE INTO judgments(run_id, judge, model, status, best, reason, mapping, result, raw, seconds, created_at) "
@@ -1762,7 +1556,8 @@ def start_judge(rid, model="", lang="zh"):
             else:
                 rows = []
                 for lab, tool in mapping.items():
-                    sc = o["scores"].get(lab) or o["scores"].get(f"回答 {lab}") or o["scores"].get(f"Answer {lab}") or {}
+                    sc = (o["scores"].get(lab) or next((o["scores"][f"{w} {lab}"] for w in parse_words("answer_word")
+                                                         if f"{w} {lab}" in o["scores"]), None) or {})
                     try:
                         overall = float(sc.get("overall"))
                     except (TypeError, ValueError):
@@ -1770,7 +1565,7 @@ def start_judge(rid, model="", lang="zh"):
                     detail = {k: sc.get(k) for k in JUDGE_KEYS if sc.get(k) is not None}
                     rows.append((rid, tool, overall, json.dumps(detail), str(sc.get("comment") or "")))
                 b = str(o.get("best") or "").strip().upper()
-                best = "tie" if b in ("TIE", "平手") else mapping.get(b.replace("回答", "").replace("ANSWER", "").strip(), "")
+                best = "tie" if b in {w.upper() for w in parse_words("tie")} | {"TIE"} else mapping.get(strip_answer_word(b), "")
                 o["consensus_n"], o["conflicts_n"] = norm_conflicts(o, mapping)
                 reason, result, status = str(o.get("reason") or ""), o, "ok"
                 for row in rows:
@@ -1848,7 +1643,7 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
     return rc, "".join(buf), "".join(err)
 
 
-def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="zh",
+def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, judge=False, judge_model="", lang="en",
               chat=False, attachments=None, share_peers=True, include_openai=True):
     cfg = load_cfg()
     on = enabled_tools(cfg)
@@ -1862,8 +1657,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         if not include_openai and "openai" in tools:
             tools = [t for t in tools if t != "openai" and t in on]
             if not tools:
-                raise ValueError("Show and select OpenAI GPT before continuing this thread." if lang == "en"
-                                 else "请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。")
+                raise ValueError(M(lang, "need_openai"))
         q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         models, efforts = json.loads(p.get("models") or "{}"), json.loads(p.get("efforts") or "{}")
         cwd, tag, chat = p.get("cwd") or None, p.get("tag") or "", bool(p.get("chat"))
@@ -1880,11 +1674,11 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                 if o["status"] == "ok" and (o["output"] or "").strip() and o["tool"] in cfg["tools"]:
                     label = cfg["tools"][o["tool"]].get("label") or o["tool"].capitalize()
                     m = o.get("actual_model") or o.get("model") or ""
-                    prev.append((o["tool"], f"{label}（{m}）" if m and lang != "en" else f"{label} ({m})" if m else label,
+                    prev.append((o["tool"], MT(lang, "peer_label", label=label, model=m) if m else label,
                                  o["output"]))
     tools = [t for t in tools if t in on] or [t for t in on if cfg["tools"][t].get("default_on", True)]
     if not tools:
-        raise ValueError("Select at least one tool." if lang == "en" else "至少选择一个参赛工具。")
+        raise ValueError(M(lang, "no_tools"))
     for rid0 in [k for k, r in RUNS.items() if r.finished_at and time.time() - r.finished_at > 1800]:
         RUNS.pop(rid0, None)  # remove from memory 30 minutes after finishing; replay from the database after that
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
@@ -1914,12 +1708,12 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                                                  models[t], efforts[t], sessions.get(t, ""),
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
                                                  peers.get(t), api_attach if uses_openai else attach,
-                                                 attach_dir if cwd and not uses_openai else ""),
+                                                 attach_dir if cwd and not uses_openai else "", len(metas)),
                          daemon=True).start()
     return rid, tools, models, efforts, shared
 
 
-def run_detail(rid, with_turns=True, lang="zh"):
+def run_detail(rid, with_turns=True, lang="en"):
     r = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
     if not r:
         return None
@@ -1970,7 +1764,7 @@ class H(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}")
 
     def _guard(self, u):
-        self.lang = "en" if (self.headers.get("X-Arena-Lang") or "").lower().startswith("en") else "zh"
+        self.lang = norm_lang(self.headers.get("X-Arena-Lang"))
         if self.headers.get("Host") not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
             self._json({"error": "bad host"}, 403)  # guard against DNS rebinding
             return False
@@ -1993,7 +1787,10 @@ class H(BaseHTTPRequestHandler):
         if p == "/":
             page_file = HERE / "arena.html"  # use arena.html from the same folder if present, so the interface can be edited separately
             src = page_file.read_text(encoding="utf-8") if page_file.exists() else PAGE
-            body = src.replace("__TOKEN__", TOKEN).encode()
+            ui = {c: LOCALES[c].get("ui", {}) for c in LANGS}
+            langs = [{"code": c, **LOCALES[c].get("_meta", {})} for c in LANGS]
+            js = lambda o: json.dumps(o, ensure_ascii=False).replace("</", "<\\/")
+            body = (src.replace("__TOKEN__", TOKEN).replace("__I18N__", js(ui)).replace("__LANGS__", js(langs))).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -2016,8 +1813,7 @@ class H(BaseHTTPRequestHandler):
             self._json({"tools": {k: {"color": v.get("color", "#888"), "label": v.get("label") or k.capitalize(),
                                       "models": MODEL_CACHE.get(k) or v.get("models", []),
                                       "dynamic": bool(v.get("models_cmd")),
-                                      "flag": bool(v.get("model_flag")), "default_label": v.get("default_label", "默认"),
-                                      "default_label_en": v.get("default_label_en") or "Default",
+                                      "flag": bool(v.get("model_flag")), "default_label": tool_text(self.lang, k, v, "default_label") or loc(self.lang, "ui", "default"),
                                       "efforts": v.get("efforts", []) if v.get("effort_args") else [],
                                       "default_on": v.get("default_on", True),
                                       "ready": v.get("transport") != "openai_responses" or openai_ready()}
@@ -2225,7 +2021,7 @@ class H(BaseHTTPRequestHandler):
             return
 
 
-PAGE = r"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Arena</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cdefs%3E%3ClinearGradient id=%22ag%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%234C8DFF%22/%3E%3Cstop offset=%22.55%22 stop-color=%22%236D6AF7%22/%3E%3Cstop offset=%221%22 stop-color=%22%23A47CF2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width=%2232%22 height=%2232%22 rx=%229%22 fill=%22url%28%23ag%29%22/%3E%3Crect x=%228%22 y=%2210%22 width=%224%22 height=%2214%22 rx=%222%22 fill=%22%23fff%22/%3E%3Crect x=%2214%22 y=%2215%22 width=%224%22 height=%229%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.88%22/%3E%3Crect x=%2220%22 y=%2212.5%22 width=%224%22 height=%2211.5%22 rx=%222%22 fill=%22%23fff%22 fill-opacity=%22.76%22/%3E%3Ccircle cx=%2224.6%22 cy=%227.4%22 r=%221.7%22 fill=%22%23fff%22/%3E%3C/svg%3E">
@@ -2580,88 +2376,88 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 <header class="top"><div class="wrap">
   <div class="brand"><span class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="ag2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4C8DFF"/><stop offset=".55" stop-color="#6D6AF7"/><stop offset="1" stop-color="#A47CF2"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#ag2)"/><rect x="8" y="10" width="4" height="14" rx="2" fill="#fff"/><rect x="14" y="15" width="4" height="9" rx="2" fill="#fff" fill-opacity=".88"/><rect x="20" y="12.5" width="4" height="11.5" rx="2" fill="#fff" fill-opacity=".76"/><circle cx="24.6" cy="7.4" r="1.7" fill="#fff"/></svg></span><span class="word">AI Arena</span></div>
   <nav>
-    <button data-v="compare" class="on" data-i18n="nav.compare">对比</button><button data-v="history" data-i18n="nav.history">历史</button>
-    <button data-v="stats" data-i18n="nav.stats">统计</button><button data-v="env" data-i18n="nav.env">环境</button>
+    <button data-v="compare" class="on" data-i18n="nav.compare">Compare</button><button data-v="history" data-i18n="nav.history">History</button>
+    <button data-v="stats" data-i18n="nav.stats">Stats</button><button data-v="env" data-i18n="nav.env">Setup</button>
   </nav>
-  <span class="sp"></span><span id="conn" hidden data-i18n="conn">后台服务未连接，请重新打开 AI Arena</span>
-  <button class="btn sm ghost" id="ppBtn" aria-controls="pp" aria-expanded="false"><span class="ppico"></span><span data-i18n="pp.btn">Prompt 库</span></button>
-  <div class="langsw" role="group" aria-label="Language / 语言"><button data-l="zh" lang="zh-CN">中文</button><button data-l="en" lang="en">EN</button></div>
-  <button class="btn sm ghost" id="quit" title="关闭后台服务" data-i18n="quit" data-i18n-title="quit.title">退出</button>
+  <span class="sp"></span><span id="conn" hidden data-i18n="conn">The background service is not running. Reopen AI Arena.</span>
+  <button class="btn sm ghost" id="ppBtn" aria-controls="pp" aria-expanded="false"><span class="ppico"></span><span data-i18n="pp.btn">Prompts</span></button>
+  <div class="langsw" role="group" aria-label="Language"></div>
+  <button class="btn sm ghost" id="quit" title="Stop the background service" data-i18n="quit" data-i18n-title="quit.title">Quit</button>
 </div></header>
 
 <main class="wrap">
 <section id="v-compare">
   <div class="composer">
     <div class="cin">
-      <textarea id="prompt" rows="1" placeholder="问一个问题，选中的模型会同时作答" data-i18n-ph="prompt.ph"></textarea>
-      <button class="ib attbtn" id="attBtn" type="button" data-i18n-title="att.title" data-i18n-aria="att.btn"></button>
+      <textarea id="prompt" rows="1" placeholder="Ask a question and the selected models answer side by side" data-i18n-ph="prompt.ph"></textarea>
+      <button class="ib attbtn" id="attBtn" type="button" data-i18n-title="Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them." data-i18n-aria="att.btn"></button>
       <input type="file" id="attInput" multiple hidden>
-      <button class="btn primary" id="go" data-i18n="send">发送</button>
+      <button class="btn primary" id="go" data-i18n="send">Send</button>
     </div>
     <div class="atts" id="atts"></div>
     <div class="lanes" id="lanes"></div>
     <div class="copts">
-      <input class="field" id="tag" placeholder="标签，如 写作" list="tagList" aria-label="标签" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
-      <input class="field" id="cwd" placeholder="工作目录（可选）" aria-label="工作目录" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
-      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">聊天模式</span></label>
+      <input class="field" id="tag" placeholder="Tag, e.g. writing" list="tagList" aria-label="Tag" data-i18n-ph="tag.ph" data-i18n-aria="tag"><datalist id="tagList"></datalist>
+      <input class="field" id="cwd" placeholder="Working folder (optional)" aria-label="Working folder" data-i18n-ph="cwd.ph" data-i18n-aria="cwd">
+      <label class="chatopt" id="chatOpt"><input type="checkbox" id="chatMode"><span data-i18n="chat.label">Chat mode</span></label>
       <span class="judgeopt" id="judgeOpt" hidden></span>
-      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">发送</span></span>
+      <span class="sp"></span><span><kbd>⌘</kbd> <kbd>Enter</kbd> <span data-i18n="toSend">to send</span></span>
     </div>
   </div>
-  <div class="feedhead"><h2 data-i18n="recent">最近的对比</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll" data-i18n="collapseAll">全部折叠</button></div>
+  <div class="feedhead"><h2 data-i18n="recent">Recent comparisons</h2><span class="sp"></span><button class="btn sm ghost" id="collapseAll" data-i18n="collapseAll">Collapse all</button></div>
   <div id="feed"></div>
-  <p id="empty" hidden data-i18n="empty">还没有对比记录。在上面输入一个问题，选中的模型会同时作答。</p>
+  <p id="empty" hidden data-i18n="empty">No comparisons yet. Ask a question above and the selected models will answer side by side.</p>
 </section>
 
 <section id="v-history" class="page" hidden>
-  <div class="bar"><input class="field" id="hq" placeholder="搜索问题" style="flex:1" data-i18n-ph="hq.ph" data-i18n-aria="hq.ph"><select class="field" id="htag"></select></div>
+  <div class="bar"><input class="field" id="hq" placeholder="Search questions" style="flex:1" data-i18n-ph="hq.ph" data-i18n-aria="hq.ph"><select class="field" id="htag"></select></div>
   <ul class="list" id="hlist"></ul>
 </section>
 
 <section id="v-stats" class="page" hidden>
   <div class="bar"><select class="field" id="stag"></select>
-    <select class="field" id="sby"><option value="" data-i18n="sby.tool">按工具</option><option value="model" data-i18n="sby.model">按工具、模型和 effort</option></select>
+    <select class="field" id="sby"><option value="" data-i18n="sby.tool">By tool</option><option value="model" data-i18n="sby.model">By tool, model and effort</option></select>
     <span id="stotal" class="note-s" style="margin:0"></span></div>
   <table class="grid" id="stable"></table>
   <div id="sjudge"></div>
-  <p class="note-s" data-i18n="stats.note">胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。</p>
+  <p class="note-s" data-i18n="stats.note">Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.</p>
 </section>
 
 <section id="v-env" class="page" hidden>
-  <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">重新检测</button><span id="envNode" class="note-s" style="margin:0"></span></div>
+  <div class="bar"><button class="btn" id="recheck" data-i18n="recheck">Check again</button><span id="envNode" class="note-s" style="margin:0"></span></div>
   <div class="bar" id="openaiPreference" hidden>
-    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">显示 OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列</span>
+    <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
   </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
-  <details class="note-s"><summary data-i18n="env.path">搜索过的 PATH</summary><pre id="epath" class="joblog"></pre></details>
-  <p class="note-s" data-i18n="env.note">没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。</p>
+  <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
+  <p class="note-s" data-i18n="env.note">For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.</p>
 </section>
 </main>
 
 <aside id="pp" aria-labelledby="ppTitle" inert>
-  <div class="pph"><h2 id="ppTitle" data-i18n="pp.title">Prompt 库</h2><span class="ppn" id="ppN"></span><span class="sp"></span>
-    <button class="btn sm" id="ppNew" data-i18n="pp.new">新建</button><button class="ib" id="ppClose" data-i18n-title="pp.close" data-i18n-aria="pp.close"></button></div>
+  <div class="pph"><h2 id="ppTitle" data-i18n="pp.title">Prompts</h2><span class="ppn" id="ppN"></span><span class="sp"></span>
+    <button class="btn sm" id="ppNew" data-i18n="pp.new">New</button><button class="ib" id="ppClose" data-i18n-title="Close" data-i18n-aria="pp.close"></button></div>
   <div class="ppbar"><input class="field" type="search" id="ppQ" data-i18n-ph="pp.search" data-i18n-aria="pp.search">
-    <button class="btn sm ghost" id="ppSaveCur" data-i18n="pp.saveCur" data-i18n-title="pp.saveCur.title"></button></div>
+    <button class="btn sm ghost" id="ppSaveCur" data-i18n="pp.saveCur" data-i18n-title="Save what is in the question box as a prompt"></button></div>
   <div class="ppcats" id="ppCats" role="group" data-i18n-aria="pp.cats"></div>
   <div class="pplist" id="ppList"></div>
   <form class="ppform" id="ppForm" hidden>
-    <label><span data-i18n="pp.f.title">标题</span><input class="field" id="ppfTitle" maxlength="200" data-i18n-ph="pp.f.titlePh"></label>
-    <label><span data-i18n="pp.f.cat">分类</span><input class="field" id="ppfCat" maxlength="40" list="ppCatList" data-i18n-ph="pp.f.catPh"><datalist id="ppCatList"></datalist></label>
-    <label class="grow"><span data-i18n="pp.f.body">内容</span><textarea class="field" id="ppfBody" rows="10" required></textarea></label>
-    <p class="pphint" data-i18n="pp.f.hint">把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。</p>
-    <div class="ppfa"><button type="button" class="btn sm ghost" id="ppfCancel" data-i18n="cancel">取消</button><button type="submit" class="btn sm primary" data-i18n="pp.f.save">保存</button></div>
+    <label><span data-i18n="pp.f.title">Title</span><input class="field" id="ppfTitle" maxlength="200" data-i18n-ph="pp.f.titlePh"></label>
+    <label><span data-i18n="pp.f.cat">Category</span><input class="field" id="ppfCat" maxlength="40" list="ppCatList" data-i18n-ph="pp.f.catPh"><datalist id="ppCatList"></datalist></label>
+    <label class="grow"><span data-i18n="pp.f.body">Text</span><textarea class="field" id="ppfBody" rows="10" required></textarea></label>
+    <p class="pphint" data-i18n="pp.f.hint">Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.</p>
+    <div class="ppfa"><button type="button" class="btn sm ghost" id="ppfCancel" data-i18n="cancel">Cancel</button><button type="submit" class="btn sm primary" data-i18n="pp.f.save">Save</button></div>
   </form>
-  <p class="pphint pphelp" data-i18n="pp.help">点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。</p>
-  <div class="ppfoot"><button type="button" id="ppRestore" data-i18n="pp.restore" data-i18n-title="pp.restore.title">恢复内置 prompt</button></div>
+  <p class="pphint pphelp" data-i18n="pp.help">Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.</p>
+  <div class="ppfoot"><button type="button" id="ppRestore" data-i18n="pp.restore" data-i18n-title="Add back any built-in prompts you deleted; your own prompts are not affected">Restore built-in prompts</button></div>
 </aside>
 
-<div id="reader" hidden role="dialog" aria-modal="true" aria-label="阅读模式" data-i18n-aria="reader">
+<div id="reader" hidden role="dialog" aria-modal="true" aria-label="Reader" data-i18n-aria="reader">
   <div class="rp">
     <div class="rph"><div id="rtabs" style="display:flex;gap:2px;flex-wrap:wrap"></div><span class="sp"></span>
-      <span class="rhint" data-i18n="reader.hint">← → 切换  Esc 关闭</span>
-      <button class="ib" id="rraw" title="原文 / 排版" data-i18n-title="raw"></button><button class="ib" id="rcopy" title="复制回答" data-i18n-title="copyAns"></button><button class="ib" id="rclose" title="关闭" data-i18n-title="close"></button></div>
+      <span class="rhint" data-i18n="reader.hint">← → switch   Esc close</span>
+      <button class="ib" id="rraw" title="Raw / formatted" data-i18n-title="raw"></button><button class="ib" id="rcopy" title="Copy answer" data-i18n-title="copyAns"></button><button class="ib" id="rclose" title="Close" data-i18n-title="close"></button></div>
     <div id="rq"></div>
     <div id="rdoc" tabindex="0"></div>
   </div>
@@ -2685,115 +2481,27 @@ const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6
   pen:'<path d="m10.8 2.7 2.5 2.5-7.6 7.6H3.2v-2.5z"/>',trash:'<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- Language ---------- */
-const I18N={zh:{
- 'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
- 'cancel':'取消','pp.btn':'Prompt 库','pp.title':'Prompt 库','pp.new':'新建','pp.close':'收起','pp.search':'搜索标题或内容','pp.saveCur':'存当前输入',
- 'pp.saveCur.title':'把输入框里的内容存成一条 prompt','pp.cats':'分类','pp.all':'全部','pp.insert':'插入到输入框','pp.pinned':'已置顶',
- 'pp.pin':'置顶','pp.unpin':'取消置顶','pp.edit':'编辑','pp.del':'删除','pp.sure':'确认删除','pp.empty':'还没有 prompt。点「新建」，或者把写好的问题用「存当前输入」存下来。',
- 'pp.noMatch':'没有匹配的 prompt','pp.nothing':'输入框是空的','pp.saved':'已保存','pp.f.title':'标题','pp.f.titlePh':'不填就用第一行','pp.f.cat':'分类',
- 'pp.f.catPh':'例如：编程、学习','pp.f.body':'内容','pp.f.save':'保存','pp.f.hint':'把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。',
- 'pp.help':'点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。',
- 'pp.restore':'恢复内置 prompt','pp.restore.title':'把删掉的内置 prompt 加回来，不影响你自己的 prompt','pp.restored':'已恢复 {0} 条内置 prompt','pp.restoredNone':'内置 prompt 都在，没有需要恢复的',
- 'quit':'退出','quit.title':'关闭后台服务','prompt.ph':'问一个问题，选中的模型会同时作答','send':'发送','toSend':'发送',
- 'tag':'标签','tag.ph':'标签，如 写作','cwd':'工作目录','cwd.ph':'工作目录（可选）','recent':'最近的对比','collapseAll':'全部折叠',
- 'empty':'还没有对比记录。在上面输入一个问题，选中的模型会同时作答。','hq.ph':'搜索问题','sby.tool':'按工具','sby.model':'按工具、模型和 effort',
- 'stats.note':'胜率是获评「最佳」的次数除以该工具参加并已评判的轮数。平均分只算打过分的回答，平均耗时和字数只算成功的回答。',
- 'recheck':'重新检测','env.path':'搜索过的 PATH','env.note':'没找到的工具：一键安装，再点「登录」在弹出的终端里登录一次，最后点「重新检测」。',
- 'reader':'阅读模式','reader.hint':'← → 切换  Esc 关闭','raw':'原文 / 排版','copyAns':'复制回答','close':'关闭',
- 'err.offline':'连不上后台服务，请重新打开 AI Arena','err.req':'请求失败 {0}','copyFail':'复制失败','default':'默认',
- 'lane.on':'参加这轮对比','lane.modelAria':'{0} 使用的模型','lane.model':'模型','lane.noModel':'这个工具没有配置模型参数','lane.custom':'自定义模型 ID…',
- 'lane.effAria':'{0} 的 effort','lane.effTitle':'Effort：模型思考的投入程度。越高越深入，也越慢、越耗额度','lane.effDefault':'Effort 默认',
- 'lane.customPrompt':'输入 {0} 的模型 ID（会作为模型参数传给它的命令行）',
- 'st.queued':'排队中','st.run':'生成中','st.ok':'完成','st.err':'出错 {0}',
- 'tie':'平手','bestOf':'最佳 {0}','stop':'停止','rerun':'重跑','rerun.title':'把首个问题作为新对话再问一次',
- 'fq.ph':'接着追问，各工具会沿用自己的上下文回答','fq':'追问','fgo':'追问','fhint':'沿用上一轮的工具、模型和 effort。',
- 'peers.label':'附上其他模型的回答','peers.title':'把上一轮其他模型的回答（标明模型）一起发给每个工具，方便让它们对比、点评或综合。想让各工具独立作答时关掉。','peers.chip':'看过其他回答',
- 'rounds':'{0} 轮','roundN':'第 {0} 轮','loading':'正在载入…','allFull':'全部展开全文','allFold':'全部收起',
- 'more':'展开全文','less':'收起','stars':'{0} 星','note.ph':'写点备注','note.aria':'{0} 的备注','best':'最佳','log':'过程日志','logEmpty':'（暂无）',
- 'c.notFound':'没有找到这个工具。','c.install':'到「环境」页安装','c.thinking':'正在思考','c.noOut':'没有输出，原因见下方「过程日志」。',
- 'copy':'复制','copied':'已复制','m.actual':'实际使用：{0}','m.chosen':'（选择的是 {0}）','m.model':'模型：{0}','m.effort':'Effort：{0}','cost':'　约 ${0}',
- 'j.autoTitle':'每轮回答完成后，自动把回答匿名交给 {0} 评分','j.auto':'{0} 自动评分','j.modelAria':'评分使用的模型',
- 'j.ask':'让 {0} 评分、找分歧',
- 'd.title':'分歧与共识','d.nConf':'{0} 处分歧','d.nFact':'（{0} 处事实冲突）','d.noConf':'没有实质分歧','d.nCons':'{0} 条共识','d.nConf1':'1 处分歧','d.nCons1':'1 条共识','d.dot':' · ',
- 'd.k.fact':'事实冲突','d.k.advice':'建议不同','d.k.emphasis':'侧重不同','d.na':'未提及','d.verdict':'{0} 的判断：','d.cons':'几家都同意','j.busy':'{0} 评分中…','j.elapsed':'已 {0} 秒','j.last':'最新输出：{0}','j.again':'重新评分','j.retry':'重试评分','j.sending':'匿名打乱后交给 {0} 评审中…',
- 'j.fail':'评分失败：{0}','j.unknown':'未知原因','j.none':'未选出','j.agree':'和你的选择一致','j.best':'{0} 认为最佳：','j.sep':'。',
- 'k.accuracy':'准确','k.completeness':'完整','k.clarity':'清晰','k.usefulness':'实用',
- 't.busy':'上一轮还在生成，等它结束再追问','t.pickTool':'至少选中一个工具',
- 'h.unrated':'未评分','h.open':'打开','h.del':'删除','h.none':'没有找到记录','h.confirm':'删除这条对话（包括所有追问）？',
- 's.total':'共 {0} 轮，已评判 {1} 轮','s.tool':'工具','s.n':'参加','s.ok':'成功率','s.avg':'平均分','s.rated':'打分数','s.best':'最佳','s.win':'胜率','s.secs':'平均耗时','s.chars':'平均字数','s.none':'还没有数据',
- 'sj.title':'{0} 评分','sj.empty':'还没有 {0} 的评分。在输入区勾选「{0} 自动评分」，或在任意一轮下面点「让 {0} 评分」。',
- 'sj.agree':'你和 {0} 选的最佳一致：{1} / {2}（{3}%）','sj.agreeEmpty':'你和它都选过最佳的轮次越多，一致率越有参考价值',
- 'sj.avg':'{0} 平均分','sj.n':'评过的回答','sj.best':'{0} 选为最佳',
- 'e.checking':'正在检测，需要几秒…','e.node':'Node {0}。','e.noNode':'没检测到 Node.js。','e.where':'一键安装会装到 ~/.ai-arena，不需要管理员权限。',
- 'e.tool':'工具','e.status':'状态','e.ver':'版本','e.path':'位置','e.act':'操作','e.login':'登录','e.installing':'安装中…','e.install':'一键安装','e.judge':'评分',
- 'e.ok':'已安装','e.missing':'没找到','e.missingExe':'没找到 {0}','e.job':'{0} 安装日志：{1}','e.running':'进行中','e.done':'成功','e.failed':'失败','e.opened':'已打开终端',
- 'allTags':'全部标签','quit.confirm':'关闭 AI Arena 后台服务？正在进行的对比会被停止。',
- 'quit.done':'AI Arena 已关闭，可以关掉这个标签页。<br>下次双击 AI Arena 就能重新打开。',
- 'att.btn':'添加附件','att.title':'添加附件：Word、Excel、PowerPoint、PDF、文本、图片等。也可以把文件拖进来，或直接粘贴。',
- 'att.uploading':'上传中','att.chars':'已提取 {0} 字','att.image':'图片，工具可直接查看','att.noText':'没提取到文字，工具可打开原文件',
- 'att.fail':'上传失败','att.remove':'移除','att.pending':'附件还在上传，请稍等','att.tooBig':'{0} 超过 50 MB，无法添加','att.open':'打开原文件','att.count':'{0} 个附件',
- 'chat.label':'聊天模式','chat.title':'适合日常问答。所有工具收到同样的要求：像通用助手那样完整作答，方案类问题给出推荐和可以照着做的例子。追问沿用此设置。','e.showOpenai':'显示 OpenAI GPT','e.openaiNoKey':'需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列','t.enableOpenai':'请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。','lane.apiKey':'需要 API Key','lane.apiSetup':'设置 ARENA_OPENAI_API_KEY 后重启。选用此线路时使用独立 API 额度。','chat.chip':'聊天模式'
-},en:{
- 'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
- 'cancel':'Cancel','pp.btn':'Prompts','pp.title':'Prompts','pp.new':'New','pp.close':'Close','pp.search':'Search titles and text','pp.saveCur':'Save input',
- 'pp.saveCur.title':'Save what is in the question box as a prompt','pp.cats':'Categories','pp.all':'All','pp.insert':'Insert into the question box','pp.pinned':'Pinned',
- 'pp.pin':'Pin','pp.unpin':'Unpin','pp.edit':'Edit','pp.del':'Delete','pp.sure':'Delete?','pp.empty':'No prompts yet. Click New, or write a question and click Save input.',
- 'pp.noMatch':'No matching prompts','pp.nothing':'The question box is empty','pp.saved':'Saved','pp.f.title':'Title','pp.f.titlePh':'Leave empty to use the first line','pp.f.cat':'Category',
- 'pp.f.catPh':'For example: Coding, Learning','pp.f.body':'Text','pp.f.save':'Save','pp.f.hint':'Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.',
- 'pp.help':'Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.',
- 'pp.restore':'Restore built-in prompts','pp.restore.title':'Add back any built-in prompts you deleted; your own prompts are not affected','pp.restored':'Restored {0} built-in prompts','pp.restoredNone':'All built-in prompts are already here',
- 'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
- 'tag':'Tag','tag.ph':'Tag, e.g. writing','cwd':'Working folder','cwd.ph':'Working folder (optional)','recent':'Recent comparisons','collapseAll':'Collapse all',
- 'empty':'No comparisons yet. Ask a question above and the selected models will answer side by side.','hq.ph':'Search questions','sby.tool':'By tool','sby.model':'By tool, model and effort',
- 'stats.note':'Win rate is the number of times a tool was picked as best, divided by the judged rounds it took part in. Average score counts rated answers only; average time and length count successful answers only.',
- 'recheck':'Check again','env.path':'Searched PATH','env.note':'For a missing tool, click Install, then Sign in and finish the one-time sign-in in the Terminal window, then click Check again.',
- 'reader':'Reader','reader.hint':'← → switch   Esc close','raw':'Raw / formatted','copyAns':'Copy answer','close':'Close',
- 'err.offline':'Cannot reach the background service. Reopen AI Arena.','err.req':'Request failed {0}','copyFail':'Copy failed','default':'Default',
- 'lane.on':'Include in this round','lane.modelAria':'{0} model','lane.model':'Model','lane.noModel':'This tool has no model option configured','lane.custom':'Custom model ID…',
- 'lane.effAria':'{0} effort','lane.effTitle':'Effort: how hard the model thinks. Higher goes deeper but is slower and uses more quota','lane.effDefault':'Effort default',
- 'lane.customPrompt':'Enter a model ID for {0} (passed to its CLI as the model option)',
- 'st.queued':'Queued','st.run':'Generating','st.ok':'Done','st.err':'Error {0}',
- 'tie':'Tie','bestOf':'Best: {0}','stop':'Stop','rerun':'Rerun','rerun.title':'Ask the first question again as a new conversation',
- 'fq.ph':'Ask a follow-up. Each tool continues its own conversation','fq':'Follow-up','fgo':'Follow up','fhint':'Uses the same tools, models and effort as the last round.',
- 'peers.label':'Include the other answers','peers.title':"Send each tool the other models' answers from the previous round, labeled by model, so it can compare, critique or combine them. Turn off to keep answers independent.",'peers.chip':'Saw other answers',
- 'rounds':'{0} rounds','roundN':'Round {0}','loading':'Loading…','allFull':'Expand all','allFold':'Collapse all',
- 'more':'Show full answer','less':'Show less','stars':'{0} stars','note.ph':'Add a note','note.aria':'Note for {0}','best':'Best','log':'Process log','logEmpty':'(empty)',
- 'c.notFound':'This tool was not found. ','c.install':'Install it on the Setup page','c.thinking':'Thinking','c.noOut':'No output. See the process log below.',
- 'copy':'Copy','copied':'Copied','m.actual':'Actual model: {0}','m.chosen':' (selected: {0})','m.model':'Model: {0}','m.effort':'Effort: {0}','cost':'   ≈ ${0}',
- 'j.autoTitle':'After each round, send the answers anonymously to {0} for scoring','j.auto':'{0} auto-score','j.modelAria':'Scoring model',
- 'j.ask':'Ask {0} to score and compare',
- 'd.title':'Disagreements and agreement','d.nConf':'{0} disagreements','d.nFact':' ({0} factual)','d.noConf':'No real disagreements','d.nCons':'{0} shared points','d.nConf1':'1 disagreement','d.nCons1':'1 shared point','d.dot':' · ',
- 'd.k.fact':'Facts differ','d.k.advice':'Advice differs','d.k.emphasis':'Emphasis differs','d.na':'Not mentioned','d.verdict':'{0}: ','d.cons':'All answers agree','j.busy':'{0} is scoring…','j.elapsed':'{0}s so far','j.last':'Latest output: {0}','j.again':'Score again','j.retry':'Retry scoring','j.sending':'Shuffled and sent anonymously to {0}…',
- 'j.fail':'Scoring failed: {0}','j.unknown':'unknown reason','j.none':'none','j.agree':'matches your pick','j.best':'{0} picks as best: ','j.sep':'. ',
- 'k.accuracy':'Accuracy','k.completeness':'Completeness','k.clarity':'Clarity','k.usefulness':'Usefulness',
- 't.busy':'The last round is still running. Wait for it to finish before following up.','t.pickTool':'Select at least one tool',
- 'h.unrated':'Not rated','h.open':'Open','h.del':'Delete','h.none':'No matching conversations','h.confirm':'Delete this conversation, including all follow-ups?',
- 's.total':'{0} rounds, {1} judged','s.tool':'Tool','s.n':'Rounds','s.ok':'Success','s.avg':'Avg score','s.rated':'Rated','s.best':'Best','s.win':'Win rate','s.secs':'Avg time','s.chars':'Avg length','s.none':'No data yet',
- 'sj.title':'{0} scores','sj.empty':'No {0} scores yet. Turn on "{0} auto-score" in the composer, or click "Ask {0} to score" under any round.',
- 'sj.agree':'Your pick matched {0}: {1} / {2} ({3}%)','sj.agreeEmpty':'The more rounds you both pick a best for, the more meaningful the match rate',
- 'sj.avg':'{0} avg score','sj.n':'Answers scored','sj.best':'Picked best by {0}',
- 'e.checking':'Checking, this takes a few seconds…','e.node':'Node {0}. ','e.noNode':'Node.js not found. ','e.where':'Install puts tools in ~/.ai-arena and needs no admin rights.',
- 'e.tool':'Tool','e.status':'Status','e.ver':'Version','e.path':'Location','e.act':'Action','e.login':'Sign in','e.installing':'Installing…','e.install':'Install','e.judge':'judge',
- 'e.ok':'Installed','e.missing':'Not found','e.missingExe':'Not found: {0}','e.job':'{0} install log: {1}','e.running':'running','e.done':'succeeded','e.failed':'failed','e.opened':'Terminal opened',
- 'allTags':'All tags','quit.confirm':'Stop the AI Arena background service? Running comparisons will be stopped.',
- 'quit.done':'AI Arena has stopped. You can close this tab.<br>Double-click AI Arena to open it again.',
- 'att.btn':'Attach files','att.title':'Attach files: Word, Excel, PowerPoint, PDF, text, images and more. You can also drag files here or paste them.',
- 'att.uploading':'Uploading','att.chars':'{0} characters extracted','att.image':'Image; tools can open it','att.noText':'No text extracted; tools can open the file',
- 'att.fail':'Upload failed','att.remove':'Remove','att.pending':'Attachments are still uploading. Please wait.','att.tooBig':'{0} is larger than 50 MB and cannot be added','att.open':'Open the original file','att.count':'{0} attachments',
- 'chat.label':'Chat mode','chat.title':'For everyday questions. Every tool gets the same instructions: answer like a general-purpose assistant, and for plans give a recommendation and an example you can follow. Follow-ups keep this setting.','e.showOpenai':'Show OpenAI GPT','e.openaiNoKey':'Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare','t.enableOpenai':'Show OpenAI GPT in Environment, then select it in Compare.','lane.apiKey':'API key required','lane.apiSetup':'Set ARENA_OPENAI_API_KEY for Arena, then restart. This option uses separate API credits.','chat.chip':'Chat mode'
-}};
-const STATUS_EN={'未安装':'Not installed','超时':'Timed out','已取消':'Canceled','启动失败':'Failed to start','已中断':'Interrupted'};
-let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(v==='zh'||v==='en')return v}catch(e){}return /^zh/i.test(navigator.language||'')?'zh':'en'})();
-const T=(k,...a)=>String((I18N[LANG]&&I18N[LANG][k])??I18N.zh[k]??k).replace(/\{(\d)\}/g,(m,i)=>a[+i]??'');
-const statusText=s=>LANG==='en'?(STATUS_EN[s]||s):s;
+const I18N=__I18N__, LANGS=__LANGS__;  // filled in by arena.py from locales/*.json
+const LANG_CODES=LANGS.map(l=>l.code);
+let LANG=(()=>{try{const v=localStorage.getItem('arenaLang');if(LANG_CODES.includes(v))return v}catch(e){}
+  for(const n of navigator.languages||[navigator.language||'']){const c=LANG_CODES.find(c=>n.toLowerCase()===c||n.toLowerCase().startsWith(c+'-'));if(c)return c}
+  return LANG_CODES.includes('en')?'en':LANG_CODES[0]})();
+const META=LANGS.find(l=>l.code===LANG)||{};
+const TT=k=>I18N[LANG]?.[k]??I18N.en?.[k];  // raw lookup; undefined when no language has the key
+const T=(k,...a)=>String(TT(k)??k).replace(/\{(\d)\}/g,(m,i)=>a[+i]??'');
+const statusText=s=>TT('status.'+s)??s;
+const allLangs=k=>[...new Set(LANG_CODES.map(c=>I18N[c]?.[k]).filter(Boolean))];  // a key's text in every language
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 function applyI18n(){
-  document.documentElement.lang=LANG==='en'?'en':'zh-CN';
+  document.documentElement.lang=META.html_lang||LANG;
+  $('.langsw').setAttribute('aria-label',T('lang.aria'));
   $$('[data-i18n]').forEach(e=>e.textContent=T(e.dataset.i18n));
   $$('[data-i18n-ph]').forEach(e=>e.placeholder=T(e.dataset.i18nPh));
   $$('[data-i18n-title]').forEach(e=>e.title=T(e.dataset.i18nTitle));
   $$('[data-i18n-aria]').forEach(e=>e.setAttribute('aria-label',T(e.dataset.i18nAria)));
   $$('.langsw button').forEach(b=>{b.classList.toggle('on',b.dataset.l===LANG);b.setAttribute('aria-pressed',b.dataset.l===LANG)});
 }
+$('.langsw').innerHTML=LANGS.map(l=>`<button data-l="${esc(l.code)}" lang="${esc(l.html_lang||l.code)}">${esc(l.name||l.code)}</button>`).join('');
 $$('.langsw button').forEach(b=>b.onclick=()=>{if(b.dataset.l===LANG)return;try{localStorage.setItem('arenaLang',b.dataset.l)}catch(e){}location.reload()});
 function md(t){t=clean(t);return (window.marked&&window.DOMPurify)?DOMPurify.sanitize(marked.parse(t)):'<pre class="rawtxt">'+esc(t)+'</pre>'}
 const ls={get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
@@ -2803,9 +2511,9 @@ function api(path,opt={}){return fetch(path,{...opt,headers:{'Content-Type':'app
   .catch(()=>{offline(false);throw T('err.offline')})
   .then(async r=>{offline(true);const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||T('err.req',r.status);return j})}
 const post=(p,b={})=>api(p,{method:'POST',body:JSON.stringify(b)});
-function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),hm=d.toLocaleTimeString(LANG==='en'?'en-GB':'zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
+function fmtTime(ts){const d=new Date(ts*1000),n=new Date(),loc=META.date_locale||LANG,hm=d.toLocaleTimeString(loc,{hour:'2-digit',minute:'2-digit',hour12:false});
   if(d.toDateString()===n.toDateString())return hm;
-  return LANG==='en'?`${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${hm}`:`${d.getMonth()+1}月${d.getDate()}日 ${hm}`}
+  return `${d.toLocaleDateString(loc,{month:'short',day:'numeric'})} ${hm}`}
 function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.textContent=t;setTimeout(()=>{b.innerHTML=o;delete b.dataset.f},1100)}
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
@@ -2815,9 +2523,9 @@ const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // hidden w
 const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
 const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
 const color=t=>CFG.tools[t]?.color||'#8893a3';
-const EFF_ZH={minimal:'最少',low:'低',medium:'中',high:'高',xhigh:'很高',max:'最高'};
-const effLabel=e=>e?(LANG==='en'?e:`${e} ${EFF_ZH[e]||''}`.trim()):'';
-const dlabel=t=>{const v=CFG.tools[t]||{};return (LANG==='en'?v.default_label_en:v.default_label)||T('default')};
+const effName=e=>{const l=TT('eff.'+e);return l&&l!==e?l:''};  // localized effort name, e.g. for high; English shows the code itself
+const effLabel=e=>e?`${e} ${effName(e)}`.trim():'';
+const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 function renderLanes(){
   const tools=visibleTools();
@@ -2830,7 +2538,7 @@ function renderLanes(){
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
       ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
-        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(LANG==='en'?e:(EFF_ZH[e]||''))}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
+        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
   if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
@@ -2921,7 +2629,7 @@ function fillTurn(r,d){   // finished rounds use the stored results; only runnin
   const got=new Set();
   for(const o of d.outputs||[])if(r.S[o.tool]){got.add(o.tool);Object.assign(r.S[o.tool],{out:o.output||'',log:o.log||'',status:o.status,secs:o.seconds,
     actual:o.actual_model||'',model:o.model||r.S[o.tool].model,effort:o.effort||r.S[o.tool].effort});$('.ch b',r.S[o.tool].el).title=o.cmd||''}
-  for(const t of r.tools){if(!got.has(t))r.S[t].status='已中断';paint(r,t)}
+  for(const t of r.tools){if(!got.has(t))r.S[t].status='interrupted';paint(r,t)}
 }
 function fold(r,f){r.folded=f;r.el.classList.toggle('folded',f);$('.th2',r.el).setAttribute('aria-expanded',!f)}
 function foldOld(th){th.turns.forEach((r,i)=>fold(r,i<th.turns.length-1))}
@@ -2955,7 +2663,7 @@ function makeCol(r,t,parent){
 }
 function content(s){
   if(s.out)return s.raw?`<pre class="rawtxt">${esc(clean(s.out))}</pre>`:`<div class="md">${md(s.out)}</div>`;
-  if(s.status==='未安装')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
+  if(s.status==='not_installed')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
   if(s.status==='run')return `<p class="ph thinking">${T('c.thinking')}</p>`;
   if(s.status)return `<p class="ph">${T('c.noOut')}</p>`;
   return `<p class="ph">${T('st.queued')}</p>`;
@@ -3151,7 +2859,7 @@ function pollJudge(r,waitStart){
 }
 function deanon(t,map){  // map the anonymous labels in Grok's comments (Answer A, A vs C) back to tool names
   const nm=l=>map&&map[l]?tname(map[l]):null;
-  return String(t||'').replace(/(?:回答|Answer|Response)\s*([A-H])\b/g,(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
+  return String(t||'').replace(new RegExp(`(?:${[...allLangs('j.answerWord'),'Answer','Response'].map(reEsc).join('|')})\\s*([A-H])\\b`,'g'),(m,l)=>nm(l)||m).replace(/\b([A-H])'s\b/g,(m,l)=>nm(l)?nm(l)+"'s":m)
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
 }
 function renderJudge(r,j){
@@ -3185,7 +2893,7 @@ function renderConflicts(r,j){  // consensus and conflicts: each tool's position
   box.innerHTML=`<summary><span class="chev sm">${svg(I.chev)}</span>${esc(T('d.title'))}<span class="dsub">${esc(sub)}</span></summary>
   <div class="dbody">${conf.map(c=>`<div class="dc"><div class="dt"><span class="dk ${esc(c.kind)}">${esc(T('d.k.'+c.kind))}</span><span>${D(c.topic)}</span></div>
     <div class="dp" style="grid-template-columns:repeat(${r.tools.length},minmax(0,1fr))">${r.tools.map(t=>{const v=(c.positions||{})[t];
-      const nm=!v||/^(未提及|not mentioned)\.?$/i.test(v.trim());
+      const nm=!v||new RegExp(`^(${[...allLangs('d.na'),'not mentioned'].map(reEsc).join('|')})[.。]?$`,'i').test(v.trim());
       return `<div class="${nm?'nm':''}" style="--c:${esc(color(t))}"><b>${esc(tname(t))}</b>${v?D(v):esc(T('d.na'))}</div>`}).join('')}</div>
     ${c.verdict?`<div class="dv"><b>${esc(T('d.verdict',tname(CFG.judge||'grok')))}</b>${D(c.verdict)}</div>`:''}</div>`).join('')}
   ${cons.length?`<ul class="dcons"><b>${esc(T('d.cons'))}</b>${cons.map(x=>`<li>${D(x)}</li>`).join('')}</ul>`:''}</div>`;
@@ -3314,7 +3022,7 @@ async function loadEnv(){
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
       <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
       <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
-    const hint=LANG==='en'?(t.hint_en||t.hint):t.hint;
+    const hint=t.hint||'';
     const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
     return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?`<small>${T('e.judge')}</small>`:''}</td>

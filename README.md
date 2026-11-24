@@ -2,7 +2,7 @@
 
 Send one question to **Claude Code**, **Codex** and **Antigravity CLI** at the same time and read their answers side by side. Rate them, follow up, let **Grok** score them anonymously, and build up your own statistics on which model does best at what.
 
-AI Arena runs locally as a single Python file with no dependencies beyond the standard library. The interface is available in English and Chinese.
+AI Arena runs locally as a single Python file with no dependencies beyond the standard library. The interface is available in English, Chinese and Japanese.
 
 ![Comparing three answers side by side](docs/compare.png)
 
@@ -22,7 +22,7 @@ AI Arena runs locally as a single Python file with no dependencies beyond the st
 - **History**: search (including follow-ups), filter by tag, reopen or rerun.
 - **Setup page**: checks whether each CLI is installed, installs missing ones into `~/.ai-arena` with one click (no admin rights needed), and opens Terminal for the one-time sign-in.
 - **macOS app**: double-click to start; it quits by itself after 15 idle minutes. Light and dark mode follow your system.
-- **English and Chinese**: switch languages from the top-right corner. Error messages, process logs and Grok's comments follow the selected language.
+- **English, Chinese and Japanese**: switch languages from the top-right corner. Everything follows the selected language: the interface, error messages and process logs, the instructions sent to the models, Grok's scoring prompt and comments, and the built-in prompts. All text lives in `locales/*.json`, so you can fix wording or add a language without touching the code. See [Languages](#languages).
 
 ![Follow-up questions continue each tool's own session](docs/follow-up.png)
 
@@ -51,7 +51,7 @@ On first use, go to the **Setup** page. For each missing tool, click **Install**
 
 ## Updating
 
-Pull the latest code (or replace `arena.py` and `arena.html`), then click **Quit** in the top-right corner and start AI Arena again. Reloading the page is not enough: it loads the new page but keeps the old background service running. Your config and database are migrated automatically on the next start.
+Pull the latest code (or replace `arena.py`, `arena.html`, `arena_openai.py` and the whole `locales` folder), then click **Quit** in the top-right corner and start AI Arena again. Reloading the page is not enough: it loads the new page but keeps the old background service running. Your config and database are migrated automatically on the next start.
 
 ## Attachments
 
@@ -86,6 +86,25 @@ The OpenAI column calls the Responses API directly (`arena_openai.py`). The key 
 
 Requests are sent with `store: false`. Attachments are sent as extracted text only, because the API cannot open files on your computer. Follow-ups replay the earlier Q&A, since there is no CLI session to resume.
 
+## Languages
+
+All text is stored in `locales/<code>.json`. `arena.py`, `arena.html` and `arena_openai.py` contain only English and code. Each file has these sections:
+
+| Section | Used for |
+|---|---|
+| `_meta` | Name shown in the language switch, the HTML `lang` value and the date format |
+| `ui` | Web interface text |
+| `msg` | Backend messages: errors and process log lines |
+| `tools` | Sign-in hints and default model names for the built-in tools |
+| `model` | Text sent to the models: chat-mode instructions, attachment, follow-up and history templates |
+| `judge` | Grok's scoring prompt |
+| `parse` | Words used to read model output in that language (for example the word for "Answer" or "tie") |
+| `openai` | Error messages of the OpenAI column |
+| `launcher` | Dialogs of the macOS app (read with `plutil`, so they work even without Python) |
+| `prompts` | The built-in prompt library; the order in `en.json` is the catalog order |
+
+To add a language, copy `en.json` to `<code>.json` (for example `ko.json`), translate the values, and restart AI Arena; it appears in the language switch automatically. Keys missing from a file fall back to English. Placeholders such as `{name}` and `{0}` must stay as they are; `{{...}}` in prompts marks the parts a user fills in.
+
 ## Files
 
 | File | Purpose |
@@ -93,6 +112,7 @@ Requests are sent with `store: false`. Attachments are sent as extracted text on
 | `arena.py` | Backend (HTTP, SSE streaming, SQLite) with a built-in copy of the web page |
 | `arena.html` | Web interface; used instead of the built-in copy when it sits next to `arena.py`, so you can edit it separately |
 | `arena_openai.py` | Helper that sends one request to the OpenAI Responses API (used only by the optional OpenAI column) |
+| `locales/` | All text in each language: `zh.json`, `en.json`, `ja.json`. Required; keep it next to `arena.py` |
 | `macos/AI Arena.app` | macOS launcher |
 
 Created on first run and excluded by `.gitignore`:
@@ -137,6 +157,7 @@ Created on first run and excluded by `.gitignore`:
 |---|---|
 | A column says **Not installed** | Open **Setup**, click **Install**, then **Sign in**. If the tool is installed somewhere unusual, put its full path in `arena_config.json`. |
 | Answers are much shorter than in the ChatGPT, Claude or Gemini apps | The CLIs are coding agents tuned for brevity, and the apps also use your personal memory. Turn on **Chat mode**. |
+| AI Arena exits with **locales/en.json is missing** | The `locales` folder must sit next to `arena.py`. Copy it from the repository when you update. |
 | Claude fails with **Invalid API key** | An `ANTHROPIC_API_KEY` from the environment took priority over your claude.ai sign-in. AI Arena now removes it before starting Claude (the process log says so). If it still fails, the key comes from somewhere else, such as `apiKeyHelper` in `~/.claude/settings.json`; run `claude` and type `/status` to see which sign-in it uses. Start AI Arena from the app rather than from another AI tool's terminal, which may carry its own keys. |
 | Antigravity's model list only shows **Default** | `agy models` needs a signed-in session. Sign in on the Setup page and restart AI Arena. If the list is still empty, `arena.log` contains the raw output of `agy models`. |
 | Codex stays on **Generating** for a long time | Codex waits instead of failing when you are not signed in. Click **Sign in** for Codex on the Setup page. |
