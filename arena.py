@@ -32,6 +32,7 @@ SRV = None
 
 DEFAULT_CFG = {
     "version": 4,
+    "workspace": "~/AI-Arena",  # folder the tools run in when no working folder is set; all Arena sessions are kept here
     "judge_timeout": 300,
     "timeout": 600,
     "tools": {
@@ -43,6 +44,8 @@ DEFAULT_CFG = {
             "login": "claude", "hint": "Follow the prompts to sign in, then type /exit",
             "resume_args": ["--resume", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "strip_env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+            "continue_app": "Claude Desktop", "continue_desktop": ["--desktop", "--resume", "{session}"],
+            "continue_terminal": ["--resume", "{session}"],
             "model_flag": "--model", "default_label": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
@@ -50,6 +53,8 @@ DEFAULT_CFG = {
         "codex": {"cmd": ["codex", "exec", "--json", "--skip-git-repo-check", "{prompt}"],
                   "parser": "codex_json", "color": "#10a37f",
                   "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [options] resume <ID> <question>
+                  "continue_app": "Codex App", "continue_url": "codex://threads/{session}",
+                  "continue_terminal": ["resume", "{session}"],
                   "package": "@openai/codex",
                   "login": "codex login", "hint": "A browser opens; sign in with your ChatGPT account",
                   "model_flag": "-m", "default_label": "Default (recommended)",
@@ -68,6 +73,7 @@ DEFAULT_CFG = {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
             "parser": "agy_stream", "color": "#7b61ff",
             "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
+            "continue_terminal": ["--conversation", "{session}"],
             "pty": True,  # agy -p can hang without a terminal, so it runs in a pseudo-terminal
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
             "login": "agy", "hint": "Sign in with your Google account, then type /quit",
@@ -565,12 +571,96 @@ def open_login(tool, lang="en"):
     return ""
 
 
+# ---------------- Workspace and continuing a session in the tool's own app ----------------
+def workspace_dir(cfg=None):
+    """Folder the tools run in when no working folder is set (config "workspace", default ~/AI-Arena)."""
+    cfg = cfg or load_cfg()
+    d = Path(os.environ.get("ARENA_WORKSPACE") or cfg.get("workspace") or "~/AI-Arena").expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
+def legacy_workdir(run):
+    """Folder an older round ran in, before the folder was recorded: the working folder,
+    else the round's attachments folder, else the folder the server was started from."""
+    if run.get("workdir"):
+        return run["workdir"]
+    if run.get("cwd"):
+        return run["cwd"]
+    if json.loads(run.get("attachments") or "[]"):
+        return str(ATTACH_DIR / run["id"])
+    return os.getcwd()
+
+
+def session_for(rid, tool):
+    """(session ID, folder) of a tool's conversation as of this round."""
+    run = q("SELECT * FROM runs WHERE id=?", (rid,), one=True)
+    if not run:
+        return "", ""
+    thread = run.get("thread") or run["id"]
+    rows = q("""SELECT o.session FROM runs r JOIN outputs o ON o.run_id=r.id AND o.tool=?
+                WHERE (r.id=? OR r.thread=?) AND r.created_at<=? AND o.session<>'' AND o.status='ok'
+                ORDER BY r.created_at""", (tool, thread, thread, run["created_at"]))
+    root = q("SELECT * FROM runs WHERE id=?", (thread,), one=True) or run
+    return (rows[-1]["session"] if rows else ""), legacy_workdir(run if run.get("workdir") else root)
+
+
+def continue_session(rid, tool, action, lang="en"):
+    """Continue a round's session outside Arena. action: app (desktop app), terminal, or command (text to copy).
+    Returns (ok, message, command)."""
+    spec = load_cfg()["tools"].get(tool) or {}
+    label = spec.get("label") or tool.capitalize()
+    sid, folder = session_for(rid, tool)
+    if not sid:
+        return False, M(lang, "no_session", label=label), ""
+    exe = spec.get("cmd", [tool])[0]
+    sub = lambda args: [a.replace("{session}", sid) for a in args]
+    term = [exe] + sub(spec.get("continue_terminal") or [])
+    command = f"cd {shlex.quote(folder)} && " + " ".join(shlex.quote(a) for a in term)
+    if action == "command" or not spec.get("continue_terminal") and action == "terminal":
+        return True, "", command
+    if sys.platform != "darwin":
+        return False, M(lang, "login_manual", cmd=command), command
+    if action == "terminal":
+        script = Path(tempfile.gettempdir()) / f"arena-continue-{tool}.command"
+        script.write_text(f"#!/bin/bash\nexport PATH={shlex.quote(PATH_CACHE)}\ncd {shlex.quote(folder)} || exit 1\n"
+                          + " ".join(shlex.quote(a) for a in term) + "\n", encoding="utf-8")
+        script.chmod(0o755)
+        subprocess.Popen(["/usr/bin/open", str(script)])  # .command files open in Terminal
+        return True, M(lang, "continue_terminal", label=label), command
+    app = spec.get("continue_app") or label
+    if spec.get("continue_url"):
+        url = spec["continue_url"].replace("{session}", sid)
+        r = subprocess.run(["/usr/bin/open", url], capture_output=True, text=True)
+        if r.returncode:
+            return False, M(lang, "continue_fail", app=app, out=(r.stderr or r.stdout).strip()[-300:]), command
+        return True, M(lang, "continue_url", app=app), command
+    if spec.get("continue_desktop"):
+        path = which(exe)
+        if not path:
+            return False, M(lang, "cmd_missing", exe=exe, cfg=CFG_PATH.name), command
+        env = child_env()
+        for k in spec.get("strip_env") or []:
+            env.pop(k, None)
+        try:
+            r = subprocess.run([path] + sub(spec["continue_desktop"]), cwd=folder if Path(folder).is_dir() else None,
+                               env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return False, M(lang, "continue_fail", app=app, out="timeout"), command
+        out = ANSI_RE.sub("", (r.stdout or "") + (r.stderr or "")).strip()
+        if r.returncode:
+            key = "continue_old" if re.search(r"unknown option|desktop", out, re.I) and "--desktop" in out else "continue_fail"
+            return False, M(lang, key, app=app, out=out[-400:]), command
+        return True, M(lang, "continue_url", app=app), command
+    return False, M(lang, "continue_none", label=label), command
+
+
 # ---------------- Database ----------------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, created_at REAL, prompt TEXT, cwd TEXT,
   tag TEXT, tools TEXT, winner TEXT, models TEXT DEFAULT '', efforts TEXT DEFAULT '',
   thread TEXT DEFAULT '', parent TEXT DEFAULT '', chat INTEGER DEFAULT 0, attachments TEXT DEFAULT '',
-  peers INTEGER DEFAULT 0);
+  peers INTEGER DEFAULT 0, workdir TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS outputs(run_id TEXT, tool TEXT, status TEXT, seconds REAL, output TEXT,
   log TEXT, cmd TEXT, model TEXT DEFAULT '', actual_model TEXT DEFAULT '', effort TEXT DEFAULT '',
   session TEXT DEFAULT '', PRIMARY KEY(run_id, tool));
@@ -591,7 +681,7 @@ DB_LOCK = threading.Lock()
 def migrate(c):  # add missing columns to older databases
     for table, col in (("runs", "models"), ("outputs", "model"), ("outputs", "actual_model"),
                        ("runs", "efforts"), ("outputs", "effort"), ("runs", "thread"), ("runs", "parent"),
-                       ("outputs", "session"), ("runs", "attachments")):
+                       ("outputs", "session"), ("runs", "attachments"), ("runs", "workdir")):
         if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
     for col in ("chat", "peers"):
@@ -1226,7 +1316,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
               peers=None,
               attach="", attach_dir="", attach_n=0):
     base, extra, note = list(spec["cmd"]), [], ""
-    if attach_dir and cwd and spec.get("add_dir_args"):  # with a working folder set, also allow reading the attachments folder
+    if attach_dir and cwd and spec.get("add_dir_args"):  # the tool runs in the workspace, so also allow reading the attachments folder
         extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
@@ -1661,6 +1751,8 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         q("UPDATE runs SET thread=? WHERE id=? AND (thread IS NULL OR thread='')", (thread, thread))
         models, efforts = json.loads(p.get("models") or "{}"), json.loads(p.get("efforts") or "{}")
         cwd, tag, chat = p.get("cwd") or None, p.get("tag") or "", bool(p.get("chat"))
+        root = q("SELECT * FROM runs WHERE id=?", (thread,), one=True) or p
+        workdir = p.get("workdir") or legacy_workdir(root)  # sessions live where the thread started
         for t in tools:
             rows = q("""SELECT r.prompt, o.output, o.session, o.status FROM runs r
                         LEFT JOIN outputs o ON o.run_id=r.id AND o.tool=?
@@ -1691,13 +1783,13 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
         cfg["tools"][t].get("transport") == "openai_responses" for t in tools
     ) else ""
     attach_dir = str(ATTACH_DIR / rid) if metas else ""
-    run_cwd = cwd or attach_dir or None  # without a working folder, run in the attachments folder so tools can read the attachments directly
+    run_cwd = workdir if parent else (cwd or workspace_dir(cfg))  # one folder per thread, so every tool can resume its session there
     peers = {t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
     shared = any(peers.values())
-    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments, peers) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "",
-                                              json.dumps(models), json.dumps(efforts), thread or rid, parent_id, int(bool(chat)),
-                                              json.dumps(metas, ensure_ascii=False), int(shared)))
+    q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments, peers, "
+      "workdir) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      (rid, time.time(), prompt, cwd or "", tag, json.dumps(tools), "", json.dumps(models), json.dumps(efforts), thread or rid,
+       parent_id, int(bool(chat)), json.dumps(metas, ensure_ascii=False), int(shared), run_cwd))
     run = Run(rid, tools)
     run.judge, run.judge_model, run.lang = bool(judge), str(judge_model or ""), lang
     RUNS[rid] = run
@@ -1708,7 +1800,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                                                  models[t], efforts[t], sessions.get(t, ""),
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
                                                  peers.get(t), api_attach if uses_openai else attach,
-                                                 attach_dir if cwd and not uses_openai else "", len(metas)),
+                                                 attach_dir if not uses_openai else "", len(metas)),
                          daemon=True).start()
     return rid, tools, models, efforts, shared
 
@@ -1813,6 +1905,9 @@ class H(BaseHTTPRequestHandler):
             self._json({"tools": {k: {"color": v.get("color", "#888"), "label": v.get("label") or k.capitalize(),
                                       "models": MODEL_CACHE.get(k) or v.get("models", []),
                                       "dynamic": bool(v.get("models_cmd")),
+                                      "continue_app": (v.get("continue_app") or "") if (v.get("continue_url") or v.get("continue_desktop")) else "",
+                                      "continue_terminal": bool(v.get("continue_terminal")),
+                                      "continue_via_url": bool(v.get("continue_url")),
                                       "flag": bool(v.get("model_flag")), "default_label": tool_text(self.lang, k, v, "default_label") or loc(self.lang, "ui", "default"),
                                       "efforts": v.get("efforts", []) if v.get("effort_args") else [],
                                       "default_on": v.get("default_on", True),
@@ -1894,6 +1989,11 @@ class H(BaseHTTPRequestHandler):
             b = self._body()
         except ValueError:
             return self._json({"error": "bad json"}, 400)
+        if p == "/api/continue":
+            ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
+                                                    str(b.get("action") or "app"), self.lang)
+            return self._json({"ok": ok, "message": message, "command": command, "error": "" if ok else message},
+                              200 if ok else 400)
         if p == "/api/prompts":
             try:
                 return self._json(save_prompt(b))
@@ -2190,6 +2290,12 @@ a.att{text-decoration:none}a.att:hover{border-color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
 .judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
+#gomenu{position:fixed;z-index:60;min-width:230px;max-width:320px;padding:5px;border-radius:12px;background:var(--paper);
+  border:1px solid var(--line);box-shadow:0 18px 40px -18px rgba(30,50,110,.45)}
+#gomenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:8px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
+#gomenu button:hover,#gomenu button:focus-visible{background:var(--soft);outline:none}
+#gomenu p{margin:4px 10px 6px;color:var(--muted);font-size:11.5px;line-height:1.5}
+#toast{white-space:pre-line}
 #ppBtn{display:inline-flex;align-items:center;gap:6px;background:#1E3A8A;border-color:#1E3A8A;color:#fff;font-weight:600;
   box-shadow:0 6px 16px -10px rgba(30,58,138,.8)}
 #ppBtn:hover{background:#1E40AF;border-color:#1E40AF}
@@ -2479,6 +2585,7 @@ const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6
   book:'<path d="M3 2.5h7.5A2.5 2.5 0 0 1 13 5v8.5H5.5A2.5 2.5 0 0 1 3 11z"/><path d="M3 11a2.5 2.5 0 0 1 2.5-2.5H13"/>',
   star:'<path d="m8 2.3 1.75 3.55 3.9.57-2.83 2.76.67 3.9L8 11.24l-3.49 1.84.67-3.9-2.83-2.76 3.9-.57z"/>',
   pen:'<path d="m10.8 2.7 2.5 2.5-7.6 7.6H3.2v-2.5z"/>',trash:'<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+  go:'<path d="M9.5 2.5h4v4M13.5 2.5l-6 6M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- Language ---------- */
 const I18N=__I18N__, LANGS=__LANGS__;  // filled in by arena.py from locales/*.json
@@ -2646,7 +2753,7 @@ function makeCol(r,t,parent){
   const s=r.S[t],c=s.el=document.createElement('section');c.className='col';c.style.setProperty('--c',color(t));
   c.innerHTML=`<header class="ch"><span class="dot"></span><b>${esc(tname(t))}</b><span class="mchip"></span><span class="sp"></span>
     <span class="state"></span><span class="tm"></span>
-    <button class="ib raw" title="${esc(T('raw'))}" aria-pressed="false">${svg(I.code)}</button><button class="ib cp" title="${esc(T('copyAns'))}">${svg(I.copy)}</button><button class="ib ex" title="${esc(T('reader'))}">${svg(I.expand)}</button></header>
+    <button class="ib go" hidden title="${esc(T('go.title'))}" aria-label="${esc(T('go.title'))}" aria-haspopup="menu" aria-expanded="false">${svg(I.go)}</button><button class="ib raw" title="${esc(T('raw'))}" aria-pressed="false">${svg(I.code)}</button><button class="ib cp" title="${esc(T('copyAns'))}">${svg(I.copy)}</button><button class="ib ex" title="${esc(T('reader'))}">${svg(I.expand)}</button></header>
   <div class="body" tabindex="0"></div><button class="more">${T('more')}</button>
   <div class="cf"><span class="stars">${[1,2,3,4,5].map(i=>`<button class="star" data-v="${i}" aria-label="${esc(T('stars',i))}">★</button>`).join('')}</span>
     <input class="note" placeholder="${esc(T('note.ph'))}" aria-label="${esc(T('note.aria',tname(t)))}"><button class="btn sm ghost win">${T('best')}</button></div>
@@ -2655,6 +2762,7 @@ function makeCol(r,t,parent){
   $('.raw',c).onclick=()=>{s.raw=!s.raw;paint(r,t)};
   $('.cp',c).onclick=e=>copyText(clean(s.out),e.currentTarget);
   $('.ex',c).onclick=()=>openReader(r,t);
+  $('.go',c).onclick=e=>goMenu(r,t,e.currentTarget);
   $('.more',c).onclick=()=>{s.full=!s.full;paint(r,t);if(!s.full)c.scrollIntoView({block:'nearest'})};
   $$('.star',c).forEach(b=>b.onclick=()=>rate(r,t,s.score===+b.dataset.v?0:+b.dataset.v));
   $('.note',c).onchange=e=>{s.note=e.target.value;rate(r,t,s.score)};
@@ -2681,6 +2789,7 @@ function render(r,t){
   c.classList.toggle('overflow',s.full||body.scrollHeight>body.clientHeight+8);
   $('.more',c).textContent=s.full?T('less'):T('more');
   $('.log pre',c).textContent=clean(s.log)||T('logEmpty');
+  $('.go',c).hidden=!(s.status==='ok'&&canContinue(t));
   const [lab,cls]=stateOf(s),st=$('.state',c);st.textContent=lab;st.className='state '+cls;
   const mc=$('.mchip',c);mc.textContent=modelText(r,t)+(s.effort?' / '+s.effort:'');
   mc.title=(s.actual?T('m.actual',s.actual)+(s.model?T('m.chosen',modelLabel(t,s.model)):''):T('m.model',modelLabel(t,s.model)))
@@ -2713,6 +2822,28 @@ function paintWinner(r){const w=r.winner;
   $('.tsum',r.el).innerHTML=w?`<span class="chip win">${winText(w)}</span>`:'';
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+
+/* ---------- Continue a session in the tool's own app or in Terminal ---------- */
+const canContinue=t=>!!(CFG.tools[t]?.continue_app||CFG.tools[t]?.continue_terminal);
+function goClose(){const m=$('#gomenu');if(!m)return;m.remove();$$('.ib.go[aria-expanded="true"]').forEach(b=>b.setAttribute('aria-expanded','false'))}
+function goMenu(r,t,btn){
+  const open=btn.getAttribute('aria-expanded')==='true';goClose();if(open)return;
+  const v=CFG.tools[t]||{},m=document.createElement('div');m.id='gomenu';m.setAttribute('role','menu');
+  m.innerHTML=(v.continue_app?`<button role="menuitem" data-a="app">${esc(T('go.app',v.continue_app))}</button>`:'')
+    +(v.continue_terminal?`<button role="menuitem" data-a="terminal">${esc(T('go.terminal'))}</button><button role="menuitem" data-a="command">${esc(T('go.copy'))}</button>`:'')
+    +`<p>${esc(T('go.note'))}</p>`;
+  document.body.appendChild(m);btn.setAttribute('aria-expanded','true');
+  const b=btn.getBoundingClientRect(),w=m.offsetWidth;
+  m.style.top=(b.bottom+6)+'px';m.style.left=Math.max(8,Math.min(innerWidth-w-8,b.right-w))+'px';
+  m.querySelector('button')?.focus();
+  m.onclick=async e=>{const it=e.target.closest('button');if(!it)return;goClose();
+    try{const d=await post('/api/continue',{run:r.id,tool:t,action:it.dataset.a});
+      if(it.dataset.a==='command'){await navigator.clipboard.writeText(d.command).catch(()=>{});return toast(T('go.copied')+'\n'+d.command)}
+      toast(d.message+(it.dataset.a==='app'&&v.continue_via_url?' '+T('go.urlHint'):''))}catch(err){toast(err)}};
+  m.onkeydown=e=>{if(e.key==='Escape'){goClose();btn.focus()}};
+}
+document.addEventListener('mousedown',e=>{if($('#gomenu')&&!e.target.closest('#gomenu,.ib.go'))goClose()});
+addEventListener('scroll',goClose,true);
 
 /* ---------- Prompt library (right-side panel) ---------- */
 const PP={items:[],cat:'',q:'',edit:null,target:null,loaded:false};

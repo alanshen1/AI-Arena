@@ -51,7 +51,7 @@
   "tag": "标签",
   "tag.ph": "标签，如 写作",
   "cwd": "工作目录",
-  "cwd.ph": "工作目录（可选）",
+  "cwd.ph": "工作目录（默认 ~/AI-Arena）",
   "recent": "最近的对比",
   "collapseAll": "全部折叠",
   "empty": "还没有对比记录。在上面输入一个问题，选中的模型会同时作答。",
@@ -235,7 +235,15 @@
   "eff.xhigh": "很高",
   "eff.max": "最高",
   "j.answerWord": "回答",
-  "lang.aria": "语言"
+  "lang.aria": "语言",
+  "go.btn": "继续",
+  "go.title": "在原工具中继续这个会话",
+  "go.app": "在 {0} 中继续",
+  "go.terminal": "在终端继续",
+  "go.copy": "复制恢复命令",
+  "go.copied": "已复制恢复命令",
+  "go.note": "在那里继续的对话不会回到 Arena。",
+  "go.urlHint": "如果没有打开这个会话，请改用「在终端继续」。"
  },
  "msg": {
   "detect_timeout": "（检测超时）",
@@ -289,7 +297,13 @@
   "empty_prompt": "问题为空",
   "no_dir": "目录不存在: {d}",
   "need_openai": "请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。",
-  "no_tools": "至少选择一个参赛工具。"
+  "no_tools": "至少选择一个参赛工具。",
+  "no_session": "这一轮没有 {label} 的会话 ID，无法继续（这一轮可能出错了）。",
+  "continue_terminal": "已在终端中继续 {label} 的会话。",
+  "continue_url": "已在 {app} 中打开这个会话。",
+  "continue_fail": "无法在 {app} 中打开：{out}",
+  "continue_old": "要直接在 {app} 中打开，需要 Claude Code v2.1.285 或以上。请在终端运行 claude update 后再试。\n{out}",
+  "continue_none": "{label} 没有配置在其他地方继续的方式。"
  },
  "tools": {
   "claude": {

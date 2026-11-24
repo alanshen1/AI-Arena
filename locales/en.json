@@ -51,7 +51,7 @@
   "tag": "Tag",
   "tag.ph": "Tag, e.g. writing",
   "cwd": "Working folder",
-  "cwd.ph": "Working folder (optional)",
+  "cwd.ph": "Working folder (default ~/AI-Arena)",
   "recent": "Recent comparisons",
   "collapseAll": "Collapse all",
   "empty": "No comparisons yet. Ask a question above and the selected models will answer side by side.",
@@ -229,7 +229,15 @@
   "status.canceled": "Canceled",
   "status.interrupted": "Interrupted",
   "j.answerWord": "Answer",
-  "lang.aria": "Language"
+  "lang.aria": "Language",
+  "go.btn": "Continue",
+  "go.title": "Continue this session in the tool itself",
+  "go.app": "Continue in {0}",
+  "go.terminal": "Continue in Terminal",
+  "go.copy": "Copy resume command",
+  "go.copied": "Resume command copied",
+  "go.note": "What you do there does not come back to Arena.",
+  "go.urlHint": "If the session did not open, use Continue in Terminal instead."
  },
  "msg": {
   "detect_timeout": "(check timed out)",
@@ -283,7 +291,13 @@
   "empty_prompt": "The question is empty",
   "no_dir": "Folder does not exist: {d}",
   "need_openai": "Show OpenAI GPT on the Setup page and select it in Compare before continuing this thread.",
-  "no_tools": "Select at least one tool."
+  "no_tools": "Select at least one tool.",
+  "no_session": "This round has no {label} session ID, so it cannot be continued (the round may have failed).",
+  "continue_terminal": "Continuing the {label} session in Terminal.",
+  "continue_url": "Opened this session in {app}.",
+  "continue_fail": "Could not open it in {app}: {out}",
+  "continue_old": "Opening directly in {app} needs Claude Code v2.1.285 or later. Run claude update in Terminal and try again.\n{out}",
+  "continue_none": "{label} has no way configured to continue elsewhere."
  },
  "tools": {
   "claude": {

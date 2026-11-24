@@ -51,7 +51,7 @@
   "tag": "タグ",
   "tag.ph": "タグ（例：執筆）",
   "cwd": "作業フォルダ",
-  "cwd.ph": "作業フォルダ（任意）",
+  "cwd.ph": "作業フォルダ（既定 ~/AI-Arena）",
   "recent": "最近の比較",
   "collapseAll": "すべて折りたたむ",
   "empty": "まだ比較がありません。上で質問を入力すると、選択したモデルが並べて回答します。",
@@ -235,7 +235,15 @@
   "eff.xhigh": "超高",
   "eff.max": "最大",
   "j.answerWord": "回答",
-  "lang.aria": "言語"
+  "lang.aria": "言語",
+  "go.btn": "続ける",
+  "go.title": "このセッションを元のツールで続ける",
+  "go.app": "{0} で続ける",
+  "go.terminal": "ターミナルで続ける",
+  "go.copy": "再開コマンドをコピー",
+  "go.copied": "再開コマンドをコピーしました",
+  "go.note": "そこで続けた会話は Arena には戻りません。",
+  "go.urlHint": "セッションが開かなかった場合は「ターミナルで続ける」を使ってください。"
  },
  "msg": {
   "detect_timeout": "（確認がタイムアウトしました）",
@@ -289,7 +297,13 @@
   "empty_prompt": "質問が空です",
   "no_dir": "フォルダが存在しません：{d}",
   "need_openai": "この会話を続ける前に、「環境」で OpenAI GPT を表示し、比較欄で選択してください。",
-  "no_tools": "ツールを少なくとも 1 つ選択してください。"
+  "no_tools": "ツールを少なくとも 1 つ選択してください。",
+  "no_session": "このラウンドには {label} のセッション ID がないため、続けられません（このラウンドでエラーが起きた可能性があります）。",
+  "continue_terminal": "ターミナルで {label} のセッションを続けます。",
+  "continue_url": "このセッションを {app} で開きました。",
+  "continue_fail": "{app} で開けませんでした：{out}",
+  "continue_old": "{app} で直接開くには Claude Code v2.1.285 以降が必要です。ターミナルで claude update を実行してから、もう一度お試しください。\n{out}",
+  "continue_none": "{label} にはほかの場所で続ける方法が設定されていません。"
  },
  "tools": {
   "claude": {
