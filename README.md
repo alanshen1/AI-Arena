@@ -14,6 +14,7 @@ AI Arena runs locally as a single Python file with no dependencies beyond the st
 - **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered. Antigravity's list is read from `agy models` at startup, so it shows the models your Google plan includes (for example Gemini 4 Neon), and the last list is cached in `models_cache.json`.
 - **Optional OpenAI GPT column**: compare GPT-6.2 Sol or Astra through the OpenAI Responses API. It is hidden unless you set `ARENA_OPENAI_API_KEY` and turn on **Show OpenAI GPT** on the Setup page. It uses separate API credits, not a ChatGPT subscription. See [OpenAI API column](#openai-api-column).
 - **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If a tool has no session ID from the last round, the earlier Q&A is added before the question instead. With **Include the other answers** (on by default), each tool also gets the other models' answers from the previous round, labeled by model, so you can ask them to compare, critique or combine the answers. Turn it off when you want each tool to answer on its own; rounds that saw the other answers are marked.
+- **Prompt library**: a panel on the right (click **Prompts** in the top bar) holds reusable prompts. Click one to insert it into the question box or follow-up box you used last. It comes with 54 built-in prompts in 12 categories (learning, writing, coding, decisions, work, research, fact-checking, follow-ups, documents, translation, everyday life and prompting), shown in the interface language. Mark the parts you change each time as `{{placeholder}}`: the first one is selected after inserting, and Tab jumps to the next. Search, filter by category, pin, edit, delete, or save what you typed with **Save input**. See [Prompt library](#prompt-library).
 - **Conversation feed**: each card is a conversation. Older rounds fold automatically, and a three-color bar on each card shows how each tool did in the latest round.
 - **Reader mode**: expand long answers in place, or open a wide reading view and use ← → to switch between models.
 - **Anonymous scoring by Grok**: after a round (automatically or on demand), the successful answers are shuffled, relabeled A/B/C and sent to Grok. Grok scores accuracy, completeness, clarity and usefulness and picks a best answer. Grok does not compete, which avoids a model favoring its own style. In the same call Grok also lists **disagreements and agreement**: each point where the answers differ (marked as conflicting facts, different advice or different emphasis), what each tool says, placed under that tool's column, and which position Grok finds more credible or how to check it, followed by the points all answers agree on. While it works, the page shows the elapsed time; scoring usually takes one to three minutes because Grok checks the facts in each answer.
@@ -67,6 +68,15 @@ Pull the latest code (or replace `arena.py` and `arena.html`), then click **Quit
 - If you leave **Working folder** empty, the tools run in the attachments folder. If you set one, Claude and Antigravity also get `--add-dir` for the attachments folder; Codex can read the path in its default sandbox.
 - A scanned PDF has no text layer. The tools can still open it, but only models that read images will see the content.
 
+## Prompt library
+
+- On a wide window the panel docks on the right and the page narrows to make room; on a narrow window it slides over the page and closes after you insert a prompt. Press Esc to close it. Whether it was open is remembered.
+- The built-in prompts switch with the interface language. Prompts you write, and built-in ones you edit, keep the text you saved.
+- Order: pinned prompts first, then your own (newest first), then the built-in ones by category. Using a prompt does not move it.
+- A built-in prompt you delete stays deleted. **Restore built-in prompts** at the bottom of the panel adds back any you deleted without touching your own.
+- The **Follow-up** prompts (compare the answers, what was missed, make it concrete) pair with **Include the other answers**; the **Documents** prompts pair with attachments.
+- Prompts are stored in `arena.db`, so they survive a browser change or cleared cache.
+
 ## OpenAI API column
 
 The OpenAI column calls the Responses API directly (`arena_openai.py`). The key is read only from the environment variable `ARENA_OPENAI_API_KEY`; it is never written to the config file or the database, and only this one request process receives it.
@@ -88,7 +98,7 @@ Requests are sent with `store: false`. Attachments are sent as extracted text on
 Created on first run and excluded by `.gitignore`:
 
 - `arena_config.json`: commands, model lists and effort options for each tool. Edit it or add new tools.
-- `arena.db`: history, ratings and scores (SQLite).
+- `arena.db`: history, ratings, scores and your prompt library (SQLite).
 - `arena.log`: launcher log.
 - `attachments/`: files you attached, one folder per round.
 - `models_cache.json`: the last model list read from `agy models`.
@@ -148,9 +158,13 @@ Created on first run and excluded by `.gitignore`:
 
 ## Screenshots
 
-| Reader mode | Stats | Dark mode |
-|---|---|---|
-| ![Reader](docs/reader.png) | ![Stats](docs/stats.png) | ![Dark mode](docs/dark.png) |
+Comparing Claude, Codex and Antigravity with the prompt library open:
+
+![Three answers side by side with the prompt library panel](docs/prompts-panel.jpg)
+
+Grok's disagreements and agreement: each point where the answers differ, what each tool says under its own column, Grok's verdict, and the points all answers share:
+
+![Disagreements and agreement between the answers](docs/disagreements.jpg)
 
 ## Third-party code
 

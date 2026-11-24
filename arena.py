@@ -572,6 +572,10 @@ CREATE TABLE IF NOT EXISTS judgments(run_id TEXT PRIMARY KEY, judge TEXT, model 
   reason TEXT, mapping TEXT, result TEXT, raw TEXT, seconds REAL, created_at REAL);
 CREATE TABLE IF NOT EXISTS judge_scores(run_id TEXT, tool TEXT, overall REAL, detail TEXT, comment TEXT,
   PRIMARY KEY(run_id, tool));
+CREATE TABLE IF NOT EXISTS prompts(id TEXT PRIMARY KEY, title TEXT, body TEXT, category TEXT DEFAULT '',
+  pinned INTEGER DEFAULT 0, uses INTEGER DEFAULT 0, created_at REAL, updated_at REAL, last_used REAL DEFAULT 0,
+  seed TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 """
 DB_LOCK = threading.Lock()
 
@@ -585,6 +589,8 @@ def migrate(c):  # 旧数据库补列
     for col in ("chat", "peers"):
         if col not in [r[1] for r in c.execute("PRAGMA table_info(runs)")]:
             c.execute(f"ALTER TABLE runs ADD COLUMN {col} INTEGER DEFAULT 0")
+    if "seed" not in [r[1] for r in c.execute("PRAGMA table_info(prompts)")]:
+        c.execute("ALTER TABLE prompts ADD COLUMN seed TEXT DEFAULT ''")
     c.commit()
 
 
@@ -598,6 +604,207 @@ def q(sql, args=(), one=False):
         finally:
             c.close()
     return (rows[0] if rows else None) if one else rows
+
+
+# ---------------- Prompt 库 ----------------
+# 内置 prompt：key, (中文 分类, 标题, 内容), (English category, title, text)
+SEED_CATALOG = [
+    # ---- 学习 ----
+    ("explain", ("学习", "解释一个概念", "用通俗的语言解释「{{概念}}」：它是什么、为什么重要、一个具体例子，以及常见的误解。"),
+     ("Learning", "Explain a concept", "Explain {{concept}} in plain language: what it is, why it matters, a concrete example, and common misconceptions.")),
+    ("three-levels", ("学习", "由浅入深讲一遍", "分三个层次讲解「{{主题}}」：先用一个十岁孩子能听懂的比喻，再给大学水平的解释，最后讲专业人士关心的细节和争议。"),
+     ("Learning", "Three levels deep", "Explain {{topic}} at three levels: an analogy a ten-year-old would get, a university-level explanation, then the details and debates experts care about.")),
+    ("concept-diff", ("学习", "概念辨析", "「{{概念 A}}」和「{{概念 B}}」有什么区别和联系？用一张对比表说明定义、适用场景和典型例子，再指出最容易混淆的地方。"),
+     ("Learning", "Tell two concepts apart", "How do {{concept A}} and {{concept B}} differ, and how are they related? Use a comparison table for definition, where each applies and a typical example, then point out where people most often confuse them.")),
+    ("learning-plan", ("学习", "学习计划", "我想在 {{时间}} 内学会 {{技能}}，现在的水平是 {{现在的水平}}，每天能投入 {{每天时间}}。请按周给我一个学习计划：每周目标、具体练习、推荐资源，以及怎么检验自己真的学会了。"),
+     ("Learning", "Study plan", "I want to learn {{skill}} in {{time frame}}. My current level is {{current level}} and I can spend {{time per day}} a day. Give me a week-by-week plan: goals, concrete exercises, recommended resources, and how to check that I have really learned it.")),
+    ("quiz-me", ("学习", "出题考我", "围绕「{{主题}}」给我出 10 道由易到难的题，选择题和简答题都要有。先只列题目，等我作答后再批改并讲解。"),
+     ("Learning", "Quiz me", "Write 10 questions on {{topic}}, from easy to hard, mixing multiple choice and short answer. List only the questions first; after I answer, mark them and explain.")),
+    ("background", ("学习", "来龙去脉", "讲讲「{{事件或思想}}」的来龙去脉：时代背景、关键人物和转折点、不同学派或立场的主要观点，以及它对今天的影响。最后推荐几本值得读的书。"),
+     ("Learning", "Background and history", "Walk me through the story of {{event or idea}}: the context, key people and turning points, the main schools of thought or positions, and its influence today. End with a few books worth reading.")),
+
+    # ---- 写作 ----
+    ("polish", ("写作", "润色文字", "润色下面这段文字：保持原意和语气，让表达更清楚、简洁、自然。先给出修改后的版本，再列出主要改动和理由。\n\n{{粘贴文字}}"),
+     ("Writing", "Polish text", "Polish the text below. Keep the meaning and tone, and make it clearer, shorter and more natural. Give the revised version first, then list the main changes and why.\n\n{{paste text}}")),
+    ("email", ("写作", "写邮件", "帮我写一封邮件给 {{收件人}}，目的是 {{目的}}。语气 {{正式 / 友好 / 简洁}}，控制在 200 字以内，并给一个主题行。要点：\n{{要点}}"),
+     ("Writing", "Write an email", "Write an email to {{recipient}} to {{purpose}}. Tone: {{formal / friendly / brief}}. Keep it under 150 words and include a subject line. Key points:\n{{key points}}")),
+    ("rewrite-audience", ("写作", "改写给不同读者", "把下面的内容改写给 {{目标读者}} 看：去掉他们不需要的术语，补上他们需要的背景，篇幅控制在 {{字数}} 字左右。\n\n{{粘贴内容}}"),
+     ("Writing", "Rewrite for an audience", "Rewrite the content below for {{audience}}: drop jargon they don't need, add the background they do, and keep it to about {{length}} words.\n\n{{paste content}}")),
+    ("outline", ("写作", "文章大纲", "为一篇关于「{{主题}}」的文章写大纲，读者是 {{读者}}。给出 3 个备选标题、各部分小标题和每部分要讲的要点，再写出第一段。"),
+     ("Writing", "Article outline", "Outline an article about {{topic}} for {{readers}}. Give 3 title options, section headings with the points each section covers, and write the opening paragraph.")),
+    ("titles", ("写作", "起标题", "为下面的内容想 10 个标题，分成稳重、吸引眼球、提问式三种风格，并说明你最推荐哪一个以及原因。\n\n{{内容概要}}"),
+     ("Writing", "Headline ideas", "Suggest 10 headlines for the content below in three styles: straightforward, attention-grabbing and question-based. Say which one you recommend and why.\n\n{{content summary}}")),
+    ("strict-editor", ("写作", "严格编辑挑毛病", "像一位严格的编辑那样审读下面的文字：指出逻辑漏洞、论据不足、啰嗦和含糊的地方，按重要程度排序，每条给出修改建议。\n\n{{粘贴文字}}"),
+     ("Writing", "Strict editor's review", "Review the text below like a strict editor: point out logical gaps, weak evidence, wordiness and vague spots, ranked by importance, each with a suggested fix.\n\n{{paste text}}")),
+
+    # ---- 编程 ----
+    ("code-review", ("编程", "代码审查", "审查下面的代码，按严重程度列出问题（bug、安全、性能、可读性），每条给出修改建议和示例代码：\n\n{{粘贴代码}}"),
+     ("Coding", "Code review", "Review the code below. List issues by severity (bugs, security, performance, readability), each with a suggested fix and example code:\n\n{{paste code}}")),
+    ("explain-code", ("编程", "解释代码", "逐段解释下面的代码在做什么、为什么这样写，指出其中隐含的假设和可能出问题的边界情况。\n\n{{粘贴代码}}"),
+     ("Coding", "Explain code", "Explain the code below section by section: what it does and why it is written this way. Point out hidden assumptions and edge cases where it could break.\n\n{{paste code}}")),
+    ("debug", ("编程", "排查报错", "我遇到了这个错误：\n{{错误信息}}\n\n相关代码：\n{{代码}}\n\n环境：{{语言 / 框架 / 版本}}。请按可能性列出原因，每个原因给出验证方法和修复办法。"),
+     ("Coding", "Debug an error", "I'm getting this error:\n{{error message}}\n\nRelevant code:\n{{code}}\n\nEnvironment: {{language / framework / version}}. List the likely causes from most to least likely, each with a way to confirm it and a fix.")),
+    ("unit-tests", ("编程", "写单元测试", "为下面的函数写单元测试，覆盖正常情况、边界情况和错误输入，使用 {{测试框架}}，并说明每个测试在验证什么。\n\n{{粘贴代码}}"),
+     ("Coding", "Write unit tests", "Write unit tests for the function below using {{test framework}}. Cover normal cases, edge cases and bad input, and say what each test checks.\n\n{{paste code}}")),
+    ("refactor", ("编程", "重构代码", "在不改变行为的前提下重构下面的代码，目标是提升 {{可读性 / 性能 / 可测试性}}。给出重构后的代码，并说明每处改动的理由。\n\n{{粘贴代码}}"),
+     ("Coding", "Refactor code", "Refactor the code below without changing its behavior, aiming for better {{readability / performance / testability}}. Show the result and explain each change.\n\n{{paste code}}")),
+    ("tech-choice", ("编程", "技术选型", "我要做 {{项目描述}}，在 {{选项 A}}、{{选项 B}}、{{选项 C}} 之间选择。请从学习成本、性能、生态、维护成本和团队情况比较，给出推荐。团队情况：{{团队情况}}"),
+     ("Coding", "Choose a technology", "I'm building {{project}} and choosing between {{option A}}, {{option B}} and {{option C}}. Compare learning curve, performance, ecosystem, maintenance cost and fit with my team, then recommend one. Team: {{team details}}")),
+    ("sql", ("编程", "写 SQL", "表结构如下：\n{{表结构}}\n\n请写一条 SQL：{{需求}}。说明思路，并指出需要建哪些索引才能跑得快。"),
+     ("Coding", "Write SQL", "Here is the schema:\n{{schema}}\n\nWrite a SQL query that {{requirement}}. Explain the approach and which indexes it needs to run fast.")),
+    ("regex", ("编程", "正则表达式", "写一个正则表达式，匹配 {{要匹配的内容}}，不匹配 {{不该匹配的内容}}。逐段解释，并给出 5 个应该匹配和 5 个不应该匹配的测试例子。"),
+     ("Coding", "Regular expression", "Write a regular expression that matches {{what to match}} but not {{what to exclude}}. Explain it piece by piece and give 5 strings that should match and 5 that should not.")),
+    ("system-design", ("编程", "系统设计", "设计一个 {{系统}}，预计规模是 {{用户量 / 请求量}}。给出架构（用文字描述）、核心组件、数据模型、关键取舍，以及规模扩大十倍时需要改什么。"),
+     ("Coding", "System design", "Design {{system}} for {{users / requests}}. Describe the architecture, core components, data model and key trade-offs, and what would change at ten times the scale.")),
+
+    # ---- 决策 ----
+    ("compare-options", ("决策", "方案对比", "比较 {{方案 A}} 和 {{方案 B}}：分别适合什么场景、优缺点、成本和风险。最后给出你的推荐和理由。"),
+     ("Decisions", "Compare two options", "Compare {{option A}} and {{option B}}: where each fits, pros and cons, cost and risk. End with your recommendation and why.")),
+    ("decide", ("决策", "帮我做决定", "我在考虑 {{决定}}。我的情况：{{背景}}。请列出支持和反对的理由、关键的不确定因素、最坏情况和应对办法，最后给出你的建议，以及什么情况下应该改变主意。"),
+     ("Decisions", "Help me decide", "I'm considering {{decision}}. My situation: {{background}}. List the reasons for and against, the key uncertainties, the worst case and how I'd handle it. Then give your advice and what would make you change your mind.")),
+    ("premortem", ("决策", "事前验尸", "假设一年后「{{计划}}」彻底失败了。请列出最可能导致失败的 8 个原因，按可能性和影响排序，每个原因给出现在就能做的预防措施。"),
+     ("Decisions", "Pre-mortem", "Imagine that a year from now {{plan}} has failed completely. List the 8 most likely reasons, ranked by likelihood and impact, each with something I can do now to prevent it.")),
+    ("devils-advocate", ("决策", "唱反调", "我的观点是：{{你的观点}}。请站在反对者的立场，给出最有力的反驳和证据，然后指出我的观点里最站不住脚的地方。"),
+     ("Decisions", "Devil's advocate", "My view: {{your view}}. Argue the other side as strongly as you can, with evidence, then point out the weakest part of my view.")),
+    ("prioritize", ("决策", "排优先级", "下面是我手头的任务。请按重要和紧急程度排优先级并说明理由，再建议哪些可以推迟、交给别人或者干脆不做：\n\n{{任务列表}}"),
+     ("Decisions", "Prioritize tasks", "Here are my tasks. Rank them by importance and urgency with reasons, and suggest which to postpone, delegate or drop:\n\n{{task list}}")),
+
+    # ---- 工作 ----
+    ("meeting-notes", ("工作", "会议纪要", "把下面的会议记录整理成纪要：结论、决定事项、行动项（负责人和截止日期）、待定问题。\n\n{{粘贴记录}}"),
+     ("Work", "Meeting notes", "Turn the notes below into meeting minutes: conclusions, decisions, action items (owner and due date) and open questions.\n\n{{paste notes}}")),
+    ("weekly-report", ("工作", "写周报", "根据下面的工作记录写一份周报：本周完成、关键数据、遇到的问题、下周计划。语言简洁，读者是 {{读者}}。\n\n{{工作记录}}"),
+     ("Work", "Weekly report", "Write a weekly report from the notes below: done this week, key numbers, problems, plan for next week. Keep it brief; the reader is {{reader}}.\n\n{{work notes}}")),
+    ("exec-summary", ("工作", "给管理层的一页汇报", "把下面的内容浓缩成给管理层的一页汇报：一句话结论、三个要点、需要对方做的决定或提供的支持。\n\n{{内容}}"),
+     ("Work", "One-page executive brief", "Condense the content below into a one-page brief for leadership: a one-sentence conclusion, three key points, and the decision or support you need from them.\n\n{{content}}")),
+    ("project-plan", ("工作", "项目计划", "为「{{项目}}」制定计划：目标和成功标准、里程碑和时间表、需要的资源、主要风险和应对办法。截止日期是 {{日期}}。"),
+     ("Work", "Project plan", "Draft a plan for {{project}}: goals and success criteria, milestones and timeline, resources needed, and the main risks with mitigations. The deadline is {{date}}.")),
+    ("feedback", ("工作", "写反馈", "帮我给 {{对象}} 写一段反馈。具体情况：{{情况}}。要具体、对事不对人：先说做得好的地方，再说需要改进的地方和建议。"),
+     ("Work", "Give feedback", "Help me write feedback for {{person}}. Situation: {{situation}}. Be specific and focus on the work, not the person: start with what went well, then what to improve and how.")),
+    ("interview-prep", ("工作", "面试准备", "我要面试 {{职位}}，公司是 {{公司}}。请列出 10 个最可能被问到的问题（技术和行为类各一半），每题给出回答思路和要点，再给我 3 个可以反问面试官的问题。"),
+     ("Work", "Interview prep", "I'm interviewing for {{role}} at {{company}}. List the 10 most likely questions (half technical, half behavioral), with how to approach each and key points, plus 3 questions I can ask the interviewer.")),
+
+    # ---- 研究 ----
+    ("research-state", ("研究", "研究现状", "总结「{{主题}}」的研究现状：主要流派和代表人物、关键研究和结论、仍有争议或没有定论的问题。区分已有共识和个别研究的发现，并推荐进一步阅读的资料。"),
+     ("Research", "State of research", "Summarize the state of research on {{topic}}: main schools and leading figures, key studies and findings, and open or disputed questions. Separate established consensus from single-study findings, and suggest further reading.")),
+    ("market", ("研究", "市场分析", "分析 {{市场或行业}}：市场规模和增长、主要玩家及各自优势、用户需求、趋势和风险。标出哪些数字需要进一步核实。"),
+     ("Research", "Market analysis", "Analyze {{market or industry}}: size and growth, main players and their strengths, customer needs, trends and risks. Flag which numbers need checking.")),
+    ("competitors", ("研究", "竞品对比", "比较 {{产品 A}}、{{产品 B}}、{{产品 C}}：定位、核心功能、定价、优缺点、适合的用户。用表格呈现，最后给出选择建议。"),
+     ("Research", "Compare products", "Compare {{product A}}, {{product B}} and {{product C}}: positioning, core features, pricing, pros and cons, and who each suits. Use a table and end with a recommendation.")),
+    ("summarize-article", ("研究", "文章摘要与评价", "用三句话概括下面文章的核心观点，再列出它的主要论据和证据，最后评价论证是否可靠、有没有遗漏的反方观点。\n\n{{粘贴文章}}"),
+     ("Research", "Summarize and assess an article", "Summarize the article below in three sentences, list its main arguments and evidence, then judge whether the reasoning holds up and which opposing views it leaves out.\n\n{{paste article}}")),
+
+    # ---- 核查 ----
+    ("fact-check", ("核查", "事实核查", "核查下面这段话里的事实和数字，逐条标出正确、错误或无法确认，并说明依据：\n\n{{粘贴内容}}"),
+     ("Fact-check", "Fact-check", "Fact-check the text below. Mark each claim or number as correct, wrong or unverifiable, and explain why:\n\n{{paste text}}")),
+    ("credibility", ("核查", "判断说法是否可信", "我看到这样一个说法：「{{说法}}」。请评估它的可信度：可能的出处、支持和反对的证据、常见的误传版本，以及我自己可以怎样核实。"),
+     ("Fact-check", "Is this claim credible?", "I came across this claim: \"{{claim}}\". Assess how credible it is: likely sources, evidence for and against, common distorted versions, and how I can check it myself.")),
+    ("check-math", ("核查", "核对计算", "检查下面的计算和推理是否正确：逐步重新计算，指出错误，并给出正确结果。\n\n{{粘贴内容}}"),
+     ("Fact-check", "Check the math", "Check the calculation and reasoning below: redo it step by step, point out any errors, and give the correct result.\n\n{{paste content}}")),
+
+    # ---- 追问（第二轮用，配合「附上其他模型的回答」） ----
+    ("compare-answers", ("追问", "对比几个回答", "比较上一轮几个模型的回答：哪些结论一致、哪些互相矛盾、谁的论据更可靠。最后综合出一个最好的答案。"),
+     ("Follow-up", "Compare the answers", "Compare the models' answers from the last round: where they agree, where they contradict each other, and whose reasoning is stronger. Then combine them into the best answer.")),
+    ("find-gaps", ("追问", "补充遗漏", "上一轮的回答有没有遗漏重要的情况、风险或反例？请补充，并说明它们会怎样改变结论。"),
+     ("Follow-up", "What was missed?", "Did the last answers miss any important cases, risks or counterexamples? Add them and explain how they change the conclusion.")),
+    ("more-concrete", ("追问", "讲得更具体", "把上面的回答讲得更具体：给出可以直接照着做的步骤、具体的数字，以及一个完整的例子。"),
+     ("Follow-up", "Make it concrete", "Make the answer above more concrete: steps I can follow directly, specific numbers, and one complete worked example.")),
+
+    # ---- 文档（配合附件） ----
+    ("summarize-attachments", ("文档", "总结附件", "总结附件的要点：先用三句话给出结论，再列出关键数据，以及需要我做决定的事项。"),
+     ("Documents", "Summarize attachments", "Summarize the attachments: give the conclusion in three sentences, then the key figures and any decisions I need to make.")),
+    ("doc-qa", ("文档", "只根据附件回答", "只根据附件内容回答：{{问题}}。引用原文支持你的回答；附件里没有的信息请直接说明，不要推测。"),
+     ("Documents", "Answer from the attachments only", "Answer using only the attachments: {{question}}. Quote the text that supports your answer; if the attachments don't say, tell me instead of guessing.")),
+    ("extract-table", ("文档", "提取数据成表", "从附件中提取 {{要提取的信息}}，整理成表格，并注明每条数据在原文中的位置（页码或章节）。"),
+     ("Documents", "Extract into a table", "Extract {{information to extract}} from the attachments into a table, noting where each item appears (page or section).")),
+    ("analyze-sheet", ("文档", "分析表格数据", "分析附件中的表格数据：概括整体情况，找出趋势和异常值，给出 3 个最值得关注的发现，并建议下一步可以做哪些分析。"),
+     ("Documents", "Analyze spreadsheet data", "Analyze the spreadsheet in the attachments: give an overview, find trends and outliers, list the 3 most important findings, and suggest what to analyze next.")),
+    ("contract", ("文档", "合同要点", "阅读附件中的合同，列出：双方的主要义务、付款和期限、违约责任、终止条款，以及对我不利或需要注意的条款。（这不能代替律师意见。）"),
+     ("Documents", "Contract key points", "Read the contract in the attachments and list: each party's main obligations, payment and deadlines, liability for breach, termination terms, and clauses that are unfavorable to me or need attention. (This is not a substitute for legal advice.)")),
+
+    # ---- 翻译 ----
+    ("translate", ("翻译", "翻译", "把下面的内容翻译成 {{目标语言}}，保持原意和语气，术语前后一致。遇到有多种译法或文化差异的地方，在译文后简要说明。\n\n{{粘贴内容}}"),
+     ("Translation", "Translate", "Translate the text below into {{target language}}, keeping the meaning and tone and using terms consistently. Where there are several possible renderings or cultural differences, add a short note after the translation.\n\n{{paste text}}")),
+    ("ja-business-email", ("翻译", "日语商务邮件", "把下面的意思写成一封得体的日语商务邮件（敬语使用恰当），并附上中文对照：\n\n{{要表达的意思}}"),
+     ("Translation", "Japanese business email", "Write a polite Japanese business email (with appropriate keigo) that says the following, with an English version alongside:\n\n{{what to say}}")),
+
+    # ---- 生活 ----
+    ("travel", ("生活", "旅行计划", "帮我规划 {{目的地}} {{天数}} 天的行程。同行：{{人数和同行者}}，预算：{{预算}}，偏好：{{偏好}}。按天列出安排、交通方式、住宿区域建议和注意事项。"),
+     ("Life", "Trip plan", "Plan a {{number of days}}-day trip to {{destination}}. Travelers: {{who is going}}. Budget: {{budget}}. Preferences: {{preferences}}. Give a day-by-day plan, how to get around, where to stay, and things to watch out for.")),
+    ("buying-advice", ("生活", "购买建议", "我想买 {{产品类型}}，预算 {{预算}}，主要用途是 {{用途}}。请说明选购时最重要的几个参数，推荐几款并做比较，最后给出你的选择。"),
+     ("Life", "Buying advice", "I want to buy {{product type}} for {{main use}}, budget {{budget}}. Explain the specs that matter most, compare a few models, and tell me which you'd pick.")),
+    ("gift", ("生活", "送礼建议", "给 {{对象}} 选礼物，场合是 {{场合}}，预算 {{预算}}，对方喜欢 {{兴趣}}。给出 8 个建议并说明理由，分成稳妥和有新意两类。"),
+     ("Life", "Gift ideas", "Suggest gifts for {{person}} for {{occasion}}, budget {{budget}}; they like {{interests}}. Give 8 ideas with reasons, split into safe choices and more original ones.")),
+
+    # ---- 提示词 ----
+    ("improve-prompt", ("提示词", "优化 prompt", "帮我改进下面这个 prompt，让 AI 的回答更准确、更符合我的需要。先指出它的问题，再给出改写后的版本：\n\n{{原 prompt}}"),
+     ("Prompting", "Improve a prompt", "Improve the prompt below so the AI's answer is more accurate and closer to what I need. Point out its problems first, then give the rewritten version:\n\n{{original prompt}}")),
+    ("system-prompt", ("提示词", "写系统提示词", "帮我为一个用于 {{用途}} 的 AI 助手写系统提示词：说明它的角色、目标用户、回答风格、必须遵守的规则和不该做的事，并给出两段示例对话。"),
+     ("Prompting", "Write a system prompt", "Write a system prompt for an AI assistant used for {{purpose}}: its role, target users, answer style, rules it must follow and things it must not do, plus two example conversations.")),
+]
+SEED_BY_KEY = {k: (zh, en) for k, zh, en in SEED_CATALOG}
+SEED_BASE_TIME = 1_000_000_000  # 内置 prompt 排在你自己的 prompt 后面，按目录顺序
+
+
+def _seeded():
+    r = q("SELECT v FROM settings WHERE k='prompt_seeds'", one=True)
+    return set(json.loads(r["v"])) if r else set()
+
+
+def _add_seeds(keys):
+    for i, (k, zh, en) in enumerate(SEED_CATALOG):
+        if k in keys:
+            q("INSERT INTO prompts(id, title, body, category, created_at, updated_at, seed) VALUES(?,?,?,?,?,?,?)",
+              (uuid.uuid4().hex[:12], zh[1], zh[2], zh[0], SEED_BASE_TIME - i, SEED_BASE_TIME - i, k))
+
+
+def ensure_seeds(restore=False):
+    """放入还没放过的内置 prompt（删掉的不会再回来，除非点「恢复内置 prompt」）。返回新放入的条数。"""
+    with SEED_LOCK:
+        seeded = _seeded()
+        if not seeded and q("SELECT v FROM settings WHERE k='prompts_seeded'", one=True):
+            # 上一版放进去的 5 条示例没有 seed 标记：按内容认出来，补上标记
+            for row in q("SELECT id, title, body FROM prompts WHERE seed=''"):
+                for i, (k, zh, en) in enumerate(SEED_CATALOG):
+                    if (row["title"], row["body"]) in ((zh[1], zh[2]), (en[1], en[2])):
+                        q("UPDATE prompts SET seed=?, created_at=?, updated_at=? WHERE id=?",
+                          (k, SEED_BASE_TIME - i, SEED_BASE_TIME - i, row["id"]))
+                        seeded.add(k)
+            seeded |= {"explain", "compare-options", "code-review", "summarize-attachments", "fact-check"}
+        present = {r["seed"] for r in q("SELECT seed FROM prompts WHERE seed<>''")}
+        todo = {k for k in SEED_BY_KEY if k not in present and (restore or k not in seeded)}
+        _add_seeds(todo)
+        q("INSERT OR REPLACE INTO settings(k, v) VALUES('prompt_seeds', ?)", (json.dumps(sorted(seeded | todo)),))
+        return len(todo)
+
+
+def list_prompts(lang="zh"):
+    ensure_seeds()
+    rows = q("SELECT * FROM prompts ORDER BY pinned DESC, created_at DESC")
+    for r in rows:  # 内置 prompt 按界面语言显示
+        if r.get("seed") in SEED_BY_KEY:
+            zh, en = SEED_BY_KEY[r["seed"]]
+            r["category"], r["title"], r["body"] = en if lang == "en" else zh
+    return rows
+
+
+SEED_LOCK = threading.Lock()
+
+
+def save_prompt(b):
+    title, body = str(b.get("title") or "").strip()[:200], str(b.get("body") or "").strip()
+    if not body:
+        raise ValueError("empty")
+    title = title or body.splitlines()[0][:40]
+    cat, now = str(b.get("category") or "").strip()[:40], time.time()
+    pid = str(b.get("id") or "")
+    if pid and q("SELECT 1 FROM prompts WHERE id=?", (pid,), one=True):
+        q("UPDATE prompts SET title=?, body=?, category=?, pinned=?, updated_at=?, seed='' WHERE id=?",
+          (title, body, cat, int(bool(b.get("pinned"))), now, pid))
+    else:
+        pid = uuid.uuid4().hex[:12]
+        q("INSERT INTO prompts(id, title, body, category, pinned, created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
+          (pid, title, body, cat, int(bool(b.get("pinned"))), now, now))
+    return q("SELECT * FROM prompts WHERE id=?", (pid,), one=True)
 
 
 # ---------------- 运行管理 ----------------
@@ -1794,6 +2001,8 @@ class H(BaseHTTPRequestHandler):
             self._json(j) if j else self._json({"error": M(self.lang, "no_judgment")}, 404)
         elif p == "/api/doctor":
             self._json(doctor(self.lang))
+        elif p == "/api/prompts":
+            self._json(list_prompts(self.lang))
         elif p == "/api/jobs":
             self._json(JOBS)
         elif p == "/api/ping":
@@ -1886,6 +2095,24 @@ class H(BaseHTTPRequestHandler):
             b = self._body()
         except ValueError:
             return self._json({"error": "bad json"}, 400)
+        if p == "/api/prompts":
+            try:
+                return self._json(save_prompt(b))
+            except ValueError:
+                return self._json({"error": M(self.lang, "empty_prompt")}, 400)
+        if p.startswith("/api/prompts/"):
+            act, pid = (p.split("/")[3:5] + ["", ""])[:2]
+            if act == "delete":
+                q("DELETE FROM prompts WHERE id=?", (pid,))
+            elif act == "use":
+                q("UPDATE prompts SET uses=uses+1, last_used=? WHERE id=?", (time.time(), pid))
+            elif act == "restore":
+                return self._json({"restored": ensure_seeds(restore=True)})
+            elif act == "pin":
+                q("UPDATE prompts SET pinned=? WHERE id=?", (int(bool(b.get("pinned"))), pid))
+            else:
+                return self._json({"error": "not found"}, 404)
+            return self._json({"ok": True})
         if p == "/api/run":
             prompt = (b.get("prompt") or "").strip()
             if not prompt:
@@ -2164,6 +2391,56 @@ a.att{text-decoration:none}a.att:hover{border-color:var(--focus)}
 .judgeopt{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 10px;border-radius:9px;background:color-mix(in srgb,var(--soft) 85%,transparent)}
 .judgeopt select{border:0;background:transparent;color:var(--muted);padding:3px 4px;border-radius:6px;font-size:12.5px;cursor:pointer}
 .judgeopt label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink)}
+#ppBtn{display:inline-flex;align-items:center;gap:6px;background:#1E3A8A;border-color:#1E3A8A;color:#fff;font-weight:600;
+  box-shadow:0 6px 16px -10px rgba(30,58,138,.8)}
+#ppBtn:hover{background:#1E40AF;border-color:#1E40AF}
+#ppBtn[aria-expanded="true"]{background:#172554;border-color:#172554}
+#ppBtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+@media (prefers-color-scheme:dark){#ppBtn{background:#2848B0;border-color:#2848B0}#ppBtn:hover{background:#3257C8;border-color:#3257C8}
+  #ppBtn[aria-expanded="true"]{background:#1E3A8A;border-color:#1E3A8A}}
+#pp{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;z-index:40;display:flex;flex-direction:column;
+  background:var(--paper);border-left:1px solid var(--line);box-shadow:-18px 0 40px -28px rgba(40,70,140,.45);
+  transform:translateX(100%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
+body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
+@media (min-width:1200px){body.ppo{padding-right:360px}body.ppo #pp{box-shadow:none}}
+@media (prefers-reduced-motion:reduce){#pp,body.ppo #pp{transition:none}}
+.pph{display:flex;align-items:center;gap:8px;padding:0 12px 0 16px;height:56px;border-bottom:1px solid var(--line);flex:none}
+.pph h2{margin:0;font-size:15px;font-weight:650}
+.ppn{color:var(--muted);font-size:12.5px}
+.ppbar{display:flex;gap:8px;padding:12px 16px 0;flex:none}
+.ppbar input{flex:1;font-size:13px}
+.ppcats{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 0;flex:none}
+.ppcats:empty{display:none}
+.ppcats button{border:1px solid var(--line);background:none;border-radius:999px;padding:2px 10px;font-size:12px;color:var(--muted);cursor:pointer}
+.ppcats button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.pplist{flex:1;overflow:auto;padding:10px 10px 4px;display:flex;flex-direction:column;gap:2px}
+.pi{position:relative;border-radius:10px}
+.pi:hover,.pi:focus-within{background:var(--soft)}
+.pib{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 10px 10px;border-radius:10px;cursor:pointer;color:var(--ink);font:inherit}
+.pib:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.pit{display:flex;align-items:center;gap:6px;font-weight:600;font-size:13.5px;padding-right:84px}
+.pit .pin{color:var(--gold);flex:none}
+.pit .pin svg{fill:currentColor}
+.pic{font-weight:400;font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 7px;flex:none}
+.pip{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-top:3px;color:var(--muted);font-size:12.5px;line-height:1.5;white-space:pre-line}
+.pip mark{background:color-mix(in srgb,var(--focus) 22%,transparent);color:inherit;border-radius:3px;padding:0 2px}
+.pia{position:absolute;top:5px;right:6px;display:flex;gap:0;opacity:0;transition:opacity .12s}
+.pi:hover .pia,.pi:focus-within .pia{opacity:1}
+.pia .ib{width:26px;height:26px}
+.pia .ib.on{color:var(--gold)}.pia .ib.on svg{fill:currentColor}
+.pia .ib.danger{color:var(--bad);width:auto;padding:0 7px;font-size:12px}
+.ppempty{padding:28px 14px;text-align:center;color:var(--muted);font-size:13px}
+.ppform{flex:1;display:flex;flex-direction:column;gap:10px;padding:14px 16px;overflow:auto}
+.ppform label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.ppform label.grow{flex:1}
+.ppform .field{font:13.5px/1.55 var(--ui);color:var(--ink)}
+.ppform textarea{flex:1;min-height:180px;resize:vertical}
+.ppfa{display:flex;justify-content:flex-end;gap:8px}
+.pphint{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.pphelp{padding:10px 16px 4px;border-top:1px solid var(--line);flex:none}
+.ppfoot{padding:0 10px 10px;flex:none}
+.ppfoot button{border:0;background:none;color:var(--muted);font-size:12px;padding:4px 6px;border-radius:6px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.ppfoot button:hover{color:var(--ink)}
 .dis{margin-top:14px;border:1px solid var(--line);border-radius:12px;background:var(--solid)}
 .dis>summary{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;font-size:13.5px;font-weight:600;color:var(--ink)}
 .dis>summary::-webkit-details-marker{display:none}
@@ -2304,6 +2581,7 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <button data-v="stats" data-i18n="nav.stats">统计</button><button data-v="env" data-i18n="nav.env">环境</button>
   </nav>
   <span class="sp"></span><span id="conn" hidden data-i18n="conn">后台服务未连接，请重新打开 AI Arena</span>
+  <button class="btn sm ghost" id="ppBtn" aria-controls="pp" aria-expanded="false"><span class="ppico"></span><span data-i18n="pp.btn">Prompt 库</span></button>
   <div class="langsw" role="group" aria-label="Language / 语言"><button data-l="zh" lang="zh-CN">中文</button><button data-l="en" lang="en">EN</button></div>
   <button class="btn sm ghost" id="quit" title="关闭后台服务" data-i18n="quit" data-i18n-title="quit.title">退出</button>
 </div></header>
@@ -2358,6 +2636,24 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
 </section>
 </main>
 
+<aside id="pp" aria-labelledby="ppTitle" inert>
+  <div class="pph"><h2 id="ppTitle" data-i18n="pp.title">Prompt 库</h2><span class="ppn" id="ppN"></span><span class="sp"></span>
+    <button class="btn sm" id="ppNew" data-i18n="pp.new">新建</button><button class="ib" id="ppClose" data-i18n-title="pp.close" data-i18n-aria="pp.close"></button></div>
+  <div class="ppbar"><input class="field" type="search" id="ppQ" data-i18n-ph="pp.search" data-i18n-aria="pp.search">
+    <button class="btn sm ghost" id="ppSaveCur" data-i18n="pp.saveCur" data-i18n-title="pp.saveCur.title"></button></div>
+  <div class="ppcats" id="ppCats" role="group" data-i18n-aria="pp.cats"></div>
+  <div class="pplist" id="ppList"></div>
+  <form class="ppform" id="ppForm" hidden>
+    <label><span data-i18n="pp.f.title">标题</span><input class="field" id="ppfTitle" maxlength="200" data-i18n-ph="pp.f.titlePh"></label>
+    <label><span data-i18n="pp.f.cat">分类</span><input class="field" id="ppfCat" maxlength="40" list="ppCatList" data-i18n-ph="pp.f.catPh"><datalist id="ppCatList"></datalist></label>
+    <label class="grow"><span data-i18n="pp.f.body">内容</span><textarea class="field" id="ppfBody" rows="10" required></textarea></label>
+    <p class="pphint" data-i18n="pp.f.hint">把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。</p>
+    <div class="ppfa"><button type="button" class="btn sm ghost" id="ppfCancel" data-i18n="cancel">取消</button><button type="submit" class="btn sm primary" data-i18n="pp.f.save">保存</button></div>
+  </form>
+  <p class="pphint pphelp" data-i18n="pp.help">点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。</p>
+  <div class="ppfoot"><button type="button" id="ppRestore" data-i18n="pp.restore" data-i18n-title="pp.restore.title">恢复内置 prompt</button></div>
+</aside>
+
 <div id="reader" hidden role="dialog" aria-modal="true" aria-label="阅读模式" data-i18n-aria="reader">
   <div class="rp">
     <div class="rph"><div id="rtabs" style="display:flex;gap:2px;flex-wrap:wrap"></div><span class="sp"></span>
@@ -2381,10 +2677,20 @@ const svg=p=>`<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke
 const I={chev:'<path d="M6 3.5 10.5 8 6 12.5"/>',expand:'<path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"/>',
   copy:'<rect x="2.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M5.5 5.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"/>',
   code:'<path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/>',close:'<path d="M4 4l8 8M12 4l-8 8"/>',
+  book:'<path d="M3 2.5h7.5A2.5 2.5 0 0 1 13 5v8.5H5.5A2.5 2.5 0 0 1 3 11z"/><path d="M3 11a2.5 2.5 0 0 1 2.5-2.5H13"/>',
+  star:'<path d="m8 2.3 1.75 3.55 3.9.57-2.83 2.76.67 3.9L8 11.24l-3.49 1.84.67-3.9-2.83-2.76 3.9-.57z"/>',
+  pen:'<path d="m10.8 2.7 2.5 2.5-7.6 7.6H3.2v-2.5z"/>',trash:'<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
   clip:'<path d="M13.2 7.6 8.1 12.7a3.2 3.2 0 0 1-4.6-4.6l5.6-5.6a2.1 2.1 0 0 1 3 3L6.6 11a1.05 1.05 0 0 1-1.5-1.5l4.9-4.9"/>'};
 /* ---------- 语言 ---------- */
 const I18N={zh:{
  'nav.compare':'对比','nav.history':'历史','nav.stats':'统计','nav.env':'环境','conn':'后台服务未连接，请重新打开 AI Arena',
+ 'cancel':'取消','pp.btn':'Prompt 库','pp.title':'Prompt 库','pp.new':'新建','pp.close':'收起','pp.search':'搜索标题或内容','pp.saveCur':'存当前输入',
+ 'pp.saveCur.title':'把输入框里的内容存成一条 prompt','pp.cats':'分类','pp.all':'全部','pp.insert':'插入到输入框','pp.pinned':'已置顶',
+ 'pp.pin':'置顶','pp.unpin':'取消置顶','pp.edit':'编辑','pp.del':'删除','pp.sure':'确认删除','pp.empty':'还没有 prompt。点「新建」，或者把写好的问题用「存当前输入」存下来。',
+ 'pp.noMatch':'没有匹配的 prompt','pp.nothing':'输入框是空的','pp.saved':'已保存','pp.f.title':'标题','pp.f.titlePh':'不填就用第一行','pp.f.cat':'分类',
+ 'pp.f.catPh':'例如：编程、学习','pp.f.body':'内容','pp.f.save':'保存','pp.f.hint':'把每次要改的地方写成 {{占位}}，插入后会自动选中，按 Tab 跳到下一个。',
+ 'pp.help':'点击一条 prompt，插入到你最后使用的输入框。{{ }} 是占位，按 Tab 依次跳过去填写。',
+ 'pp.restore':'恢复内置 prompt','pp.restore.title':'把删掉的内置 prompt 加回来，不影响你自己的 prompt','pp.restored':'已恢复 {0} 条内置 prompt','pp.restoredNone':'内置 prompt 都在，没有需要恢复的',
  'quit':'退出','quit.title':'关闭后台服务','prompt.ph':'问一个问题，选中的模型会同时作答','send':'发送','toSend':'发送',
  'tag':'标签','tag.ph':'标签，如 写作','cwd':'工作目录','cwd.ph':'工作目录（可选）','recent':'最近的对比','collapseAll':'全部折叠',
  'empty':'还没有对比记录。在上面输入一个问题，选中的模型会同时作答。','hq.ph':'搜索问题','sby.tool':'按工具','sby.model':'按工具、模型和 effort',
@@ -2426,6 +2732,13 @@ const I18N={zh:{
  'chat.label':'聊天模式','chat.title':'适合日常问答。所有工具收到同样的要求：像通用助手那样完整作答，方案类问题给出推荐和可以照着做的例子。追问沿用此设置。','e.showOpenai':'显示 OpenAI GPT','e.openaiNoKey':'需要先设置 ARENA_OPENAI_API_KEY，否则对比页不会显示这一列','t.enableOpenai':'请先在「环境」中显示 OpenAI GPT，再在对比栏选中它。','lane.apiKey':'需要 API Key','lane.apiSetup':'设置 ARENA_OPENAI_API_KEY 后重启。选用此线路时使用独立 API 额度。','chat.chip':'聊天模式'
 },en:{
  'nav.compare':'Compare','nav.history':'History','nav.stats':'Stats','nav.env':'Setup','conn':'The background service is not running. Reopen AI Arena.',
+ 'cancel':'Cancel','pp.btn':'Prompts','pp.title':'Prompts','pp.new':'New','pp.close':'Close','pp.search':'Search titles and text','pp.saveCur':'Save input',
+ 'pp.saveCur.title':'Save what is in the question box as a prompt','pp.cats':'Categories','pp.all':'All','pp.insert':'Insert into the question box','pp.pinned':'Pinned',
+ 'pp.pin':'Pin','pp.unpin':'Unpin','pp.edit':'Edit','pp.del':'Delete','pp.sure':'Delete?','pp.empty':'No prompts yet. Click New, or write a question and click Save input.',
+ 'pp.noMatch':'No matching prompts','pp.nothing':'The question box is empty','pp.saved':'Saved','pp.f.title':'Title','pp.f.titlePh':'Leave empty to use the first line','pp.f.cat':'Category',
+ 'pp.f.catPh':'For example: Coding, Learning','pp.f.body':'Text','pp.f.save':'Save','pp.f.hint':'Write the parts you change each time as {{placeholder}}. After inserting, the first one is selected; press Tab to jump to the next.',
+ 'pp.help':'Click a prompt to insert it into the box you used last. {{ }} marks a placeholder; press Tab to jump between them.',
+ 'pp.restore':'Restore built-in prompts','pp.restore.title':'Add back any built-in prompts you deleted; your own prompts are not affected','pp.restored':'Restored {0} built-in prompts','pp.restoredNone':'All built-in prompts are already here',
  'quit':'Quit','quit.title':'Stop the background service','prompt.ph':'Ask a question and the selected models answer side by side','send':'Send','toSend':'to send',
  'tag':'Tag','tag.ph':'Tag, e.g. writing','cwd':'Working folder','cwd.ph':'Working folder (optional)','recent':'Recent comparisons','collapseAll':'Collapse all',
  'empty':'No comparisons yet. Ask a question above and the selected models will answer side by side.','hq.ph':'Search questions','sby.tool':'By tool','sby.model':'By tool, model and effort',
@@ -2689,6 +3002,86 @@ function paintWinner(r){const w=r.winner;
   $('.tsum',r.el).innerHTML=w?`<span class="chip win">${winText(w)}</span>`:'';
   if(r===lastTurn(r.th))paintHead(r.th)}
 function setWinner(r,w){r.winner=w;r.meta.winner=w;paintWinner(r);if(r.judge)renderJudge(r,r.judge);post('/api/winner',{run_id:r.id,winner:w}).catch(toast)}
+
+/* ---------- Prompt 库（右侧面板） ---------- */
+const PP={items:[],cat:'',q:'',edit:null,target:null,loaded:false};
+const PH_RE=/\{\{[^{}\n]*\}\}/g;
+const ppDocked=()=>matchMedia('(min-width:1200px)').matches;
+function ppOpen(on){
+  document.body.classList.toggle('ppo',on);$('#pp').inert=!on;$('#ppBtn').setAttribute('aria-expanded',on);ls.set('arenaPP',on);
+  if(on){if(!PP.loaded)ppLoad();setTimeout(()=>$('#ppQ').focus(),60)}
+}
+async function ppLoad(){try{PP.items=await api('/api/prompts');PP.loaded=true;ppRender()}catch(e){toast(e)}}
+function ppRender(){
+  $('#ppN').textContent=PP.items.length?String(PP.items.length):'';
+  const cats=[...new Set([...PP.items].sort((a,b)=>b.created_at-a.created_at).map(x=>x.category).filter(Boolean))];  // 你的分类在前，内置分类按目录顺序
+  if(PP.cat&&!cats.includes(PP.cat))PP.cat='';
+  $('#ppCats').innerHTML=cats.length?[['',T('pp.all')],...cats.map(c=>[c,c])].map(([v,l])=>`<button type="button" data-c="${esc(v)}" aria-pressed="${PP.cat===v}">${esc(l)}</button>`).join(''):'';
+  $('#ppCatList').innerHTML=cats.map(c=>`<option value="${esc(c)}">`).join('');
+  const qq=PP.q.trim().toLowerCase();
+  const list=PP.items.filter(x=>(!PP.cat||x.category===PP.cat)&&(!qq||(x.title+'\n'+x.body+'\n'+x.category).toLowerCase().includes(qq)));
+  const hl=s=>esc(s).replace(/\{\{[^{}\n]*\}\}/g,m=>`<mark>${m}</mark>`);
+  $('#ppList').innerHTML=list.length?list.map(x=>`<div class="pi" data-id="${esc(x.id)}">
+    <button type="button" class="pib" title="${esc(T('pp.insert'))}"><span class="pit">${x.pinned?`<span class="pin" aria-label="${esc(T('pp.pinned'))}">${svg(I.star)}</span>`:''}<span>${esc(x.title)}</span>${x.category?`<span class="pic">${esc(x.category)}</span>`:''}</span>
+    <span class="pip">${hl(x.body)}</span></button>
+    <div class="pia"><button type="button" class="ib pinb${x.pinned?' on':''}" aria-pressed="${!!x.pinned}" title="${esc(T(x.pinned?'pp.unpin':'pp.pin'))}" aria-label="${esc(T(x.pinned?'pp.unpin':'pp.pin'))}">${svg(I.star)}</button><button type="button" class="ib edb" title="${esc(T('pp.edit'))}" aria-label="${esc(T('pp.edit'))}">${svg(I.pen)}</button><button type="button" class="ib delb" title="${esc(T('pp.del'))}" aria-label="${esc(T('pp.del'))}">${svg(I.trash)}</button></div></div>`).join('')
+    :`<p class="ppempty">${esc(T(PP.items.length?'pp.noMatch':'pp.empty'))}</p>`;
+}
+function ppForm(item,body){
+  PP.edit=item||{};$('#ppForm').hidden=false;$('#ppList').hidden=$('.ppbar').hidden=$('#ppCats').hidden=$('.pphelp').hidden=$('.ppfoot').hidden=true;
+  $('#ppfTitle').value=item?.title||'';$('#ppfCat').value=item?.category||PP.cat||'';$('#ppfBody').value=body??item?.body??'';
+  ($('#ppfBody').value?$('#ppfTitle'):$('#ppfBody')).focus();
+}
+function ppFormClose(){PP.edit=null;$('#ppForm').hidden=true;$('#ppList').hidden=$('.ppbar').hidden=$('#ppCats').hidden=$('.pphelp').hidden=$('.ppfoot').hidden=false}
+function ppTarget(){const t=PP.target;return t&&t.isConnected&&t.offsetParent?t:$('#prompt')}
+function selectPlaceholder(ta,from){
+  PH_RE.lastIndex=0;const all=[...ta.value.matchAll(PH_RE)];if(!all.length)return false;
+  const m=all.find(x=>x.index>=from)||all[0];ta.focus();ta.setSelectionRange(m.index,m.index+m[0].length);return true;
+}
+function ppInsert(x){
+  if(!$('#v-compare').offsetParent)show('compare');
+  const ta=ppTarget(),s=ta.selectionStart??ta.value.length,e=ta.selectionEnd??s;
+  const pre=ta.value.slice(0,s),sep=pre&&!/\n\s*$/.test(pre)?'\n\n':'';
+  ta.focus();ta.setRangeText(sep+x.body,s,e,'end');ta.dispatchEvent(new Event('input',{bubbles:true}));
+  if(!selectPlaceholder(ta,s))ta.setSelectionRange(ta.selectionEnd,ta.selectionEnd);
+  post('/api/prompts/use/'+encodeURIComponent(x.id)).catch(()=>{});
+  if(!ppDocked())ppOpen(false);
+}
+document.addEventListener('focusin',e=>{if(e.target.matches('#prompt,.fq'))PP.target=e.target});
+document.addEventListener('keydown',e=>{  // Tab 跳到下一个 {{占位}}
+  const ta=e.target;if(e.key!=='Tab'||e.shiftKey||e.altKey||e.metaKey||e.ctrlKey||!ta.matches?.('#prompt,.fq'))return;
+  PH_RE.lastIndex=0;if(!PH_RE.test(ta.value))return;
+  e.preventDefault();selectPlaceholder(ta,ta.selectionEnd);
+});
+function ppInit(){
+  $('#ppBtn .ppico').innerHTML=svg(I.book);$('#ppClose').innerHTML=svg(I.close);
+  $('#ppBtn').onclick=()=>ppOpen(!document.body.classList.contains('ppo'));
+  $('#ppClose').onclick=()=>{ppOpen(false);$('#ppBtn').focus()};
+  $('#pp').addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();if(!$('#ppForm').hidden)ppFormClose();else{ppOpen(false);$('#ppBtn').focus()}}});
+  $('#ppQ').oninput=e=>{PP.q=e.target.value;ppRender()};
+  $('#ppQ').onkeydown=e=>{if(e.key==='Enter'){const b=$('#ppList .pib');if(b){e.preventDefault();b.click()}}};
+  $('#ppCats').onclick=e=>{const b=e.target.closest('button');if(!b)return;PP.cat=b.dataset.c;ppRender()};
+  $('#ppNew').onclick=()=>ppForm(null);
+  $('#ppSaveCur').onclick=()=>{const v=ppTarget().value.trim();if(!v)return toast(T('pp.nothing'));ppForm(null,v)};
+  $('#ppfCancel').onclick=ppFormClose;
+  $('#ppRestore').onclick=async()=>{try{const r=await post('/api/prompts/restore');await ppLoad();toast(r.restored?T('pp.restored',r.restored):T('pp.restoredNone'))}catch(e){toast(e)}};
+  $('#ppForm').onsubmit=async e=>{e.preventDefault();
+    const body=$('#ppfBody').value.trim();if(!body)return $('#ppfBody').focus();
+    try{const it=await post('/api/prompts',{id:PP.edit?.id||'',title:$('#ppfTitle').value,category:$('#ppfCat').value,body,pinned:PP.edit?.pinned||0});
+      const i=PP.items.findIndex(x=>x.id===it.id);if(i>=0)PP.items[i]=it;else PP.items.unshift(it);
+      ppFormClose();ppRender();toast(T('pp.saved'))}catch(err){toast(err)}};
+  $('#ppList').onclick=async e=>{
+    const row=e.target.closest('.pi');if(!row)return;const x=PP.items.find(i=>i.id===row.dataset.id);if(!x)return;
+    if(e.target.closest('.pinb')){x.pinned=x.pinned?0:1;await post('/api/prompts/pin/'+encodeURIComponent(x.id),{pinned:x.pinned}).catch(toast);
+      PP.items.sort((a,b)=>(b.pinned-a.pinned)||(b.created_at-a.created_at));return ppRender()}
+    if(e.target.closest('.edb'))return ppForm(x);
+    const d=e.target.closest('.delb');
+    if(d){if(d.dataset.sure){await post('/api/prompts/delete/'+encodeURIComponent(x.id)).catch(toast);PP.items=PP.items.filter(i=>i!==x);return ppRender()}
+      d.dataset.sure='1';d.classList.add('danger');d.textContent=T('pp.sure');setTimeout(()=>{if(d.isConnected){delete d.dataset.sure;d.classList.remove('danger');d.innerHTML=svg(I.trash)}},3000);return}
+    if(e.target.closest('.pib'))ppInsert(x);
+  };
+  if(ls.get('arenaPP',false))ppOpen(true);
+}
 
 /* ---------- 动态模型列表（agy models 在后台读取，读到后补进下拉框） ---------- */
 function modelsLater(n){
@@ -2972,7 +3365,7 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   JSEL={model:'',auto:false,...ls.get('arenaJudge',{})};
   CHAT=ls.get('arenaChat',true);$('#chatMode').checked=CHAT;$('#chatOpt').title=T('chat.title');
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
-  modelsLater(0);
+  modelsLater(0);ppInit();
   COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
   renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
