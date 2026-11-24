@@ -301,7 +301,8 @@
   "continue_old": "Opening directly in {app} needs Claude Code v2.1.285 or later. Run claude update in Terminal and try again.\n{out}",
   "continue_none": "{label} has no way configured to continue elsewhere.",
   "desktop_synced": "[{app}] Added to the {app} sidebar\n",
-  "desktop_sync_fail": "[{app}] Could not add it: {msg}\n"
+  "desktop_sync_fail": "[{app}] Could not add it: {msg}\n",
+  "title_note": "[title] {title}\n"
  },
  "tools": {
   "claude": {
@@ -348,7 +349,8 @@
   "transcript_round": "[Round {i}: my question]\n{q}\n\n[Round {i}: your answer]\n{a}\n",
   "no_answer": "(no answer)",
   "new_question": "[New question]\n{prompt}",
-  "judge_attach_intro": "The question came with attachments. Their text is below for checking the answers.\n\n"
+  "judge_attach_intro": "The question came with attachments. Their text is below for checking the answers.\n\n",
+  "title_prompt": "Write a title for a conversation that starts with the question below, capturing its core in at most 8 words. Output only the title, with no quotes, final period or explanation.\n\n{q}"
  },
  "judge": {
   "intro": [

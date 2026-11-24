@@ -307,7 +307,8 @@
   "continue_old": "要直接在 {app} 中打开，需要 Claude Code v2.1.285 或以上。请在终端运行 claude update 后再试。\n{out}",
   "continue_none": "{label} 没有配置在其他地方继续的方式。",
   "desktop_synced": "[{app}] 已加入 {app} 的侧边栏\n",
-  "desktop_sync_fail": "[{app}] 没能加入：{msg}\n"
+  "desktop_sync_fail": "[{app}] 没能加入：{msg}\n",
+  "title_note": "[标题] {title}\n"
  },
  "tools": {
   "claude": {
@@ -354,7 +355,8 @@
   "transcript_round": "【第 {i} 轮 我的问题】\n{q}\n\n【第 {i} 轮 你的回答】\n{a}\n",
   "no_answer": "（没有回答）",
   "new_question": "【新问题】\n{prompt}",
-  "judge_attach_intro": "提问时附带了附件，下面是附件的文字内容，供你核对回答是否准确。\n\n"
+  "judge_attach_intro": "提问时附带了附件，下面是附件的文字内容，供你核对回答是否准确。\n\n",
+  "title_prompt": "请为下面这个问题拟一个会话标题，用不超过 20 个字概括它的要义。只输出标题本身，不要加引号、句号或任何解释。\n\n{q}"
  },
  "judge": {
   "intro": [

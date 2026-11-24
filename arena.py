@@ -46,6 +46,9 @@ DEFAULT_CFG = {
             "strip_env": ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
             "continue_app": "Claude Desktop", "continue_desktop": ["--desktop", "--resume", "{session}"],
             "continue_terminal": ["--resume", "{session}"],
+            "system_prompt_args": ["--append-system-prompt", "{text}"],  # chat-mode instructions go here, not into the question
+            "name_args": ["--name", "{name}"],  # session title shown in Claude Desktop and /resume
+            "title_cmd": ["-p", "--model", "haiku", "--no-session-persistence", "{prompt}"],  # summarizes a question into that title
             "model_flag": "--model", "default_label": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
@@ -640,6 +643,28 @@ def desktop_sync(rid, lang="en", tool=None):
         note = M(lang, "desktop_synced" if ok else "desktop_sync_fail", app=spec.get("continue_app") or o["tool"], msg=message)
         q("UPDATE outputs SET log=COALESCE(log,'')||? WHERE run_id=? AND tool=?", (note, rid, o["tool"]))
         print(note.strip(), flush=True)
+
+
+def session_title(spec, question, lang="en"):
+    """Title for a new session. With "Add new conversations to Claude Desktop" on, a quick model call sums up the
+    question (title_cmd, not saved as a session); otherwise, or if that fails, the first line of the question."""
+    first = re.sub(r"\s+", " ", (question or "").strip().split("\n")[0])
+    fallback = first if len(first) <= 30 else first[:30].rstrip() + "…"
+    exe = which(spec.get("cmd", [""])[0])
+    if not (spec.get("title_cmd") and exe and get_setting("desktop_sync", False)):
+        return fallback or "AI Arena"
+    env = child_env()
+    for k in spec.get("strip_env") or []:
+        env.pop(k, None)
+    ask = MT(lang, "title_prompt", q=question[:4000])
+    try:
+        r = subprocess.run([exe] + [ask if a == "{prompt}" else a for a in spec["title_cmd"]], capture_output=True,
+                           text=True, timeout=30, env=env, stdin=subprocess.DEVNULL, cwd=tempfile.gettempdir())
+        lines = [x.strip().strip("\"'“”「」*#").strip() for x in ANSI_RE.sub("", r.stdout or "").splitlines() if x.strip()]
+        title = lines[0].rstrip("。.") if r.returncode == 0 and lines else ""
+    except (OSError, subprocess.TimeoutExpired):
+        title = ""
+    return (title[:40] if title else fallback) or "AI Arena"
 
 
 def run_in_tty(cmd, cwd, env, timeout=60):
@@ -1383,6 +1408,14 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
               peers=None,
               attach="", attach_dir="", attach_n=0):
     base, extra, note = list(spec["cmd"]), [], ""
+    lang = getattr(run, "lang", "en")
+    chat_in_system = chat and bool(spec.get("system_prompt_args"))
+    if chat_in_system:  # keeps the conversation clean: the tool's history shows only the question
+        extra += [a.replace("{text}", MT(lang, "chat_prefix").strip()) for a in spec["system_prompt_args"]]
+    if spec.get("name_args") and not session:  # a new session gets a title that sums up the question
+        title = session_title(spec, prompt, lang)
+        extra += [a.replace("{name}", title) for a in spec["name_args"]]
+        note += M(lang, "title_note", title=title)
     if attach_dir and cwd and spec.get("add_dir_args"):  # the tool runs in the workspace, so also allow reading the attachments folder
         extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
     if model and spec.get("model_flag"):
@@ -1403,7 +1436,6 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if rargs and spec.get("resume_pos") == "prompt":  # subcommand form: placed right before the question
         i = base.index("{prompt}") if "{prompt}" in base else len(base)
         base[i:i] = rargs
-    lang = getattr(run, "lang", "en")
     if rargs:
         note = M(lang, "resume_native", name=name, sid=session[:12])
     elif history:
@@ -1416,7 +1448,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
     uses_openai = spec.get("transport") == "openai_responses"
     if chat and not uses_openai:  # chat mode: instructions are added only when sending to the tool; the stored question stays unchanged
-        prompt = MT(lang, "chat_prefix") + (prompt if attach or pblock else MT(lang, "question_label") + prompt)
+        if not chat_in_system:
+            prompt = MT(lang, "chat_prefix") + (prompt if attach or pblock else MT(lang, "question_label") + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
     if uses_openai:

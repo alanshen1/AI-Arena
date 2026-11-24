@@ -307,7 +307,8 @@
   "continue_old": "{app} で直接開くには Claude Code v2.1.285 以降が必要です。ターミナルで claude update を実行してから、もう一度お試しください。\n{out}",
   "continue_none": "{label} にはほかの場所で続ける方法が設定されていません。",
   "desktop_synced": "[{app}] {app} のサイドバーに追加しました\n",
-  "desktop_sync_fail": "[{app}] 追加できませんでした：{msg}\n"
+  "desktop_sync_fail": "[{app}] 追加できませんでした：{msg}\n",
+  "title_note": "[タイトル] {title}\n"
  },
  "tools": {
   "claude": {
@@ -354,7 +355,8 @@
   "transcript_round": "【第 {i} ラウンド：私の質問】\n{q}\n\n【第 {i} ラウンド：あなたの回答】\n{a}\n",
   "no_answer": "（回答なし）",
   "new_question": "【新しい質問】\n{prompt}",
-  "judge_attach_intro": "質問には添付ファイルがありました。回答が正確かどうか確認できるよう、添付ファイルのテキストを以下に示します。\n\n"
+  "judge_attach_intro": "質問には添付ファイルがありました。回答が正確かどうか確認できるよう、添付ファイルのテキストを以下に示します。\n\n",
+  "title_prompt": "次の質問で始まる会話のタイトルを、要点を 20 文字以内でまとめて付けてください。タイトルだけを出力し、引用符・句点・説明は付けないでください。\n\n{q}"
  },
  "judge": {
   "intro": [
