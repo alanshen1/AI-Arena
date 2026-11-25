@@ -1448,7 +1448,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         note += M(lang, "peers_note", names=", ".join(n for n, _ in peers))
     uses_openai = spec.get("transport") == "openai_responses"
     if chat and not uses_openai:  # chat mode: instructions are added only when sending to the tool; the stored question stays unchanged
-        if not chat_in_system:
+        if not chat_in_system and not rargs:  # a native resume already holds the instructions from the first turn; repeating them would bloat every follow-up
             prompt = MT(lang, "chat_prefix") + (prompt if attach or pblock else MT(lang, "question_label") + prompt)
         note += M(lang, "chat_note")
     cmd = [prompt if a == "{prompt}" else a.replace("{prompt}", prompt) for a in base]
