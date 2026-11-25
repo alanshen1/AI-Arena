@@ -245,6 +245,8 @@
   "go.note": "在那里继续的对话不会回到 Arena。",
   "go.urlHint": "如果没有打开这个会话，请改用「在终端继续」。",
   "e.desktopSync": "新对话自动加入 Claude Desktop",
+  "e.codexDesktopOpen": "在 Codex App 自动打开新对话",
+  "e.codexDesktopOpenNote": "第一轮成功回答后，在后台打开原会话。",
   "e.desktopSyncNote": "每个新对话的第一轮完成后，把 Claude 的会话加入 Claude Desktop 侧边栏的「{0}」分组，每个会话只加一次。加入时 Claude Desktop 会打开这个会话。需要 Claude Code v2.1.285 或以上，并用 Claude 订阅登录。"
  },
  "msg": {
@@ -307,6 +309,8 @@
   "continue_old": "要直接在 {app} 中打开，需要 Claude Code v2.1.285 或以上。请在终端运行 claude update 后再试。\n{out}",
   "continue_none": "{label} 没有配置在其他地方继续的方式。",
   "desktop_synced": "[{app}] 已加入 {app} 的侧边栏\n",
+  "codex_desktop_opened": "[{app}] 已请求桌面应用打开原会话。\n",
+  "codex_desktop_open_failed": "[{app}] 无法打开会话：{msg}\n",
   "desktop_sync_fail": "[{app}] 没能加入：{msg}\n",
   "title_note": "[标题] {title}\n"
  },

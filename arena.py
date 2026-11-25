@@ -58,6 +58,7 @@ DEFAULT_CFG = {
                   "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [options] resume <ID> <question>
                   "continue_app": "Codex App", "continue_url": "codex://threads/{session}",
                   "continue_terminal": ["resume", "{session}"],
+                  "system_prompt_args": ["-c", "developer_instructions={toml_text}"],
                   "package": "@openai/codex",
                   "login": "codex login", "hint": "A browser opens; sign in with your ChatGPT account",
                   "model_flag": "-m", "default_label": "Default (recommended)",
@@ -619,28 +620,46 @@ def set_setting(key, value):
 
 
 SYNC_LOCK = threading.Lock()
+CODEX_DESKTOP_LOCK = threading.Lock()
 
 
 def desktop_sync(rid, lang="en", tool=None):
-    """Setting "Add new conversations to Claude Desktop": move each new session of a tool that can open in its
-    desktop app (claude --desktop --resume) once, so it shows in that app's sidebar under the workspace folder."""
-    if not get_setting("desktop_sync", False):
+    """Apply each desktop preference once per completed native session."""
+    claude_sync = bool(get_setting("desktop_sync", False))
+    codex_open = sys.platform == "darwin" and bool(get_setting("codex_desktop_open", False))
+    if not (claude_sync or codex_open):
         return
     tools = load_cfg()["tools"]
-    for o in q("SELECT tool, status, session FROM outputs WHERE run_id=?", (rid,)):
+    for o in q("SELECT tool, status, session, length(trim(coalesce(output, ''))) > 0 AS has_output "
+               "FROM outputs WHERE run_id=?", (rid,)):
         if tool and o["tool"] != tool:
             continue
         spec = tools.get(o["tool"]) or {}
-        if o["status"] != "ok" or not o["session"] or not spec.get("continue_desktop"):
+        is_codex = o["tool"] == "codex" and bool(spec.get("continue_url"))
+        if o["status"] != "ok" or not o["session"]:
             continue
-        with SYNC_LOCK:  # each session only once
-            done = set(get_setting("desktop_synced", []))
+        if is_codex:
+            if not (codex_open and o["has_output"]
+                    and re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", o["session"])):
+                continue
+            lock, setting = CODEX_DESKTOP_LOCK, "codex_desktop_opened"
+        elif claude_sync and spec.get("continue_desktop"):
+            lock, setting = SYNC_LOCK, "desktop_synced"
+        else:
+            continue
+        with lock:  # each session only once
+            done = get_setting(setting, [])
             if o["session"] in done:
                 continue
-            ok, message, _ = continue_session(rid, o["tool"], "app", lang)
+            try:
+                ok, message, _ = continue_session(rid, o["tool"], "app", lang, background=is_codex)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                ok, message = False, str(exc)
             if ok:
-                set_setting("desktop_synced", (list(done) + [o["session"]])[-5000:])
-        note = M(lang, "desktop_synced" if ok else "desktop_sync_fail", app=spec.get("continue_app") or o["tool"], msg=message)
+                set_setting(setting, (done + [o["session"]])[-5000:])
+        ok_key, fail_key = ("codex_desktop_opened", "codex_desktop_open_failed") if is_codex else (
+            "desktop_synced", "desktop_sync_fail")
+        note = M(lang, ok_key if ok else fail_key, app=spec.get("continue_app") or o["tool"], msg=message)
         q("UPDATE outputs SET log=COALESCE(log,'')||? WHERE run_id=? AND tool=?", (note, rid, o["tool"]))
         print(note.strip(), flush=True)
 
@@ -700,7 +719,7 @@ def run_in_tty(cmd, cwd, env, timeout=60):
     return rc, ANSI_RE.sub("", "".join(out)).replace("\r", "").strip()
 
 
-def continue_session(rid, tool, action, lang="en"):
+def continue_session(rid, tool, action, lang="en", background=False):
     """Continue a round's session outside Arena. action: app (desktop app), terminal, or command (text to copy).
     Returns (ok, message, command)."""
     spec = load_cfg()["tools"].get(tool) or {}
@@ -726,7 +745,9 @@ def continue_session(rid, tool, action, lang="en"):
     app = spec.get("continue_app") or label
     if spec.get("continue_url"):
         url = spec["continue_url"].replace("{session}", sid)
-        r = subprocess.run(["/usr/bin/open", url], capture_output=True, text=True)
+        options = ["-g", "-b", "com.openai.codex"] if background else []
+        r = subprocess.run(["/usr/bin/open", *options, url], capture_output=True, text=True,
+                           timeout=15 if background else None)
         if r.returncode:
             return False, M(lang, "continue_fail", app=app, out=(r.stderr or r.stdout).strip()[-300:]), command
         return True, M(lang, "continue_url", app=app), command
@@ -1411,7 +1432,10 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     lang = getattr(run, "lang", "en")
     chat_in_system = chat and bool(spec.get("system_prompt_args"))
     if chat_in_system:  # keeps the conversation clean: the tool's history shows only the question
-        extra += [a.replace("{text}", MT(lang, "chat_prefix").strip()) for a in spec["system_prompt_args"]]
+        instructions = MT(lang, "chat_prefix").strip()
+        toml_string = json.dumps(instructions, ensure_ascii=False)
+        extra += [a.replace("{toml_text}", toml_string) if "{toml_text}" in a else a.replace("{text}", instructions)
+                  for a in spec["system_prompt_args"]]
     if spec.get("name_args") and not session:  # a new session gets a title that sums up the question
         title = session_title(spec, prompt, lang)
         extra += [a.replace("{name}", title) for a in spec["name_args"]]
@@ -1583,7 +1607,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort, sess[0]))
     run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
-    if status == "ok" and sess[0] and spec.get("continue_desktop"):  # add to Claude Desktop as soon as this tool is done
+    if status == "ok" and sess[0] and (spec.get("continue_desktop") or (name == "codex" and spec.get("continue_url"))):
         threading.Thread(target=desktop_sync, args=(run.id, lang, name), daemon=True).start()
     with run.cond:
         run.pending.discard(name)
@@ -2018,7 +2042,12 @@ class H(BaseHTTPRequestHandler):
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags,
                         "desktop_sync": {"available": any(v.get("continue_desktop") for v in cfg["tools"].values()),
                                          "on": bool(get_setting("desktop_sync", False)),
-                                         "folder": Path(workspace_dir(cfg)).name}})
+                                         "folder": Path(workspace_dir(cfg)).name},
+                        "codex_desktop_open": {
+                            "available": sys.platform == "darwin" and bool(
+                                cfg["tools"].get("codex", {}).get("continue_url")),
+                            "on": bool(get_setting("codex_desktop_open", False)),
+                        }})
         elif p.startswith("/api/file/"):  # open an attachment's original file for a round
             parts = p.split("/")
             if len(parts) != 6:
@@ -2095,9 +2124,11 @@ class H(BaseHTTPRequestHandler):
         except ValueError:
             return self._json({"error": "bad json"}, 400)
         if p == "/api/settings":
-            if "desktop_sync" in b:
-                set_setting("desktop_sync", bool(b["desktop_sync"]))
-            return self._json({"desktop_sync": bool(get_setting("desktop_sync", False))})
+            keys = ("desktop_sync", "codex_desktop_open")
+            for key in keys:
+                if key in b:
+                    set_setting(key, bool(b[key]))
+            return self._json({key: bool(get_setting(key, False)) for key in keys})
         if p == "/api/continue":
             ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
                                                     str(b.get("action") or "app"), self.lang)
@@ -2646,6 +2677,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="bar" id="desktopPref" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
     <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
+  </div>
+  <div class="bar" id="codexDesktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="codexDesktopOpen"><span data-i18n="e.codexDesktopOpen">Open new conversations in Codex App</span></label>
+    <span class="note-s" data-i18n="e.codexDesktopOpenNote" style="margin:0;max-width:760px"></span>
   </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
@@ -3320,6 +3355,20 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
     const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
     $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);
     sw.onchange=()=>post('/api/settings',{desktop_sync:sw.checked}).then(d=>{CFG.desktop_sync.on=d.desktop_sync}).catch(e=>{sw.checked=!sw.checked;toast(e)});
+  }
+  if(CFG.codex_desktop_open?.available){
+    const sw=$('#codexDesktopOpen');
+    $('#codexDesktopPref').hidden=false;
+    sw.checked=!!CFG.codex_desktop_open.on;
+    sw.onchange=async()=>{
+      const selected=sw.checked;
+      sw.disabled=true;
+      try{
+        const d=await post('/api/settings',{codex_desktop_open:selected});
+        sw.checked=!!d.codex_desktop_open;
+      }catch(e){sw.checked=!selected;toast(e)}
+      finally{sw.disabled=false}
+    };
   }
   if(SEL.openai){
     const setting=$('#showOpenai');

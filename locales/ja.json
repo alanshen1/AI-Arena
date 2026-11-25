@@ -245,6 +245,8 @@
   "go.note": "そこで続けた会話は Arena には戻りません。",
   "go.urlHint": "セッションが開かなかった場合は「ターミナルで続ける」を使ってください。",
   "e.desktopSync": "新しい会話を Claude Desktop に自動で追加",
+  "e.codexDesktopOpen": "新しい会話を Codex アプリで自動的に開く",
+  "e.codexDesktopOpenNote": "最初の回答が完了すると、元の会話をバックグラウンドで開きます。",
   "e.desktopSyncNote": "新しい会話の最初のラウンドが終わると、Claude のセッションを Claude Desktop のサイドバーの「{0}」グループに追加します（各セッション 1 回だけ）。追加するときに Claude Desktop がそのセッションを開きます。Claude Code v2.1.285 以降と、Claude サブスクリプションでのサインインが必要です。"
  },
  "msg": {
@@ -307,6 +309,8 @@
   "continue_old": "{app} で直接開くには Claude Code v2.1.285 以降が必要です。ターミナルで claude update を実行してから、もう一度お試しください。\n{out}",
   "continue_none": "{label} にはほかの場所で続ける方法が設定されていません。",
   "desktop_synced": "[{app}] {app} のサイドバーに追加しました\n",
+  "codex_desktop_opened": "[{app}] デスクトップアプリに元の会話を開くようリクエストしました。\n",
+  "codex_desktop_open_failed": "[{app}] 会話を開けませんでした：{msg}\n",
   "desktop_sync_fail": "[{app}] 追加できませんでした：{msg}\n",
   "title_note": "[タイトル] {title}\n"
  },

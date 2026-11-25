@@ -415,6 +415,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
     <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
   </div>
+  <div class="bar" id="codexDesktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="codexDesktopOpen"><span data-i18n="e.codexDesktopOpen">Open new conversations in Codex App</span></label>
+    <span class="note-s" data-i18n="e.codexDesktopOpenNote" style="margin:0;max-width:760px"></span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -1088,6 +1092,20 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
     const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
     $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);
     sw.onchange=()=>post('/api/settings',{desktop_sync:sw.checked}).then(d=>{CFG.desktop_sync.on=d.desktop_sync}).catch(e=>{sw.checked=!sw.checked;toast(e)});
+  }
+  if(CFG.codex_desktop_open?.available){
+    const sw=$('#codexDesktopOpen');
+    $('#codexDesktopPref').hidden=false;
+    sw.checked=!!CFG.codex_desktop_open.on;
+    sw.onchange=async()=>{
+      const selected=sw.checked;
+      sw.disabled=true;
+      try{
+        const d=await post('/api/settings',{codex_desktop_open:selected});
+        sw.checked=!!d.codex_desktop_open;
+      }catch(e){sw.checked=!selected;toast(e)}
+      finally{sw.disabled=false}
+    };
   }
   if(SEL.openai){
     const setting=$('#showOpenai');
