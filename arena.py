@@ -49,6 +49,7 @@ DEFAULT_CFG = {
             "system_prompt_args": ["--append-system-prompt", "{text}"],  # chat-mode instructions go here, not into the question
             "name_args": ["--name", "{name}"],  # session title shown in Claude Desktop and /resume
             "title_cmd": ["-p", "--model", "haiku", "--no-session-persistence", "{prompt}"],  # summarizes a question into that title
+            "judge_args": ["--no-session-persistence"],  # when Claude is the scoring model, its calls are not kept as sessions
             "model_flag": "--model", "default_label": "Default (account default)",
             "effort_args": ["--effort", "{effort}"], "efforts": ["low", "medium", "high", "xhigh", "max"],
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
@@ -238,8 +239,33 @@ def openai_ready():
     return bool(os.environ.get("ARENA_OPENAI_API_KEY", "").strip())
 
 
-def judge_tool(cfg):
+def judge_choices(cfg):
+    """Tools that can score a round: the dedicated scoring model and every competing CLI tool.
+    The OpenAI API column is left out: it is opt-in and billed per request."""
+    return [n for n, sp in cfg["tools"].items()
+            if sp.get("enabled", True) and sp.get("cmd") and sp.get("transport") != "openai_responses"]
+
+
+def default_judge(cfg):
     return next((n for n, sp in cfg["tools"].items() if sp.get("role") == "judge" and sp.get("enabled", True)), None)
+
+
+def judge_tool(cfg):
+    """The scoring model chosen on the Setup page (setting judge_tool); Grok when none is chosen."""
+    try:
+        want = get_setting("judge_tool", "")
+    except Exception:  # no database yet
+        want = ""
+    return want if want and want in judge_choices(cfg) else default_judge(cfg)
+
+
+def parsed_output(spec, raw, lang="en"):
+    """The answer text in a tool's raw output: tools with a JSON stream (claude, codex, agy) go through their parser."""
+    make = PARSERS.get(spec.get("parser") or "")
+    if not make:
+        return raw
+    parser = make(lang)
+    return "".join(v for k, v in parser.feed(raw) + parser.flush() if k == "out")
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]")
@@ -466,7 +492,8 @@ def doctor(lang="en"):
         res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""), "install": bool(spec.get("package") or spec.get("install_script")),
                      "login": spec.get("login") or "", "hint": tool_text(lang, name, spec, "hint")}
 
-    names = enabled_tools(cfg) + ([judge_tool(cfg)] if judge_tool(cfg) else [])
+    jn = judge_tool(cfg)
+    names = enabled_tools(cfg) + ([jn] if jn and jn not in enabled_tools(cfg) else [])
     ths = [threading.Thread(target=check, args=(n, cfg["tools"][n])) for n in names]
     for th in ths:
         th.start()
@@ -1925,8 +1952,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             i -= 1
         base[i:i] = extra
     if rargs and spec.get("resume_pos") == "prompt":  # subcommand form: placed right before the question
-        i = base.index("{prompt}") if "{prompt}" in base else len(base)
-        base[i:i] = rargs
+        resume_index = base.index("{prompt}") if "{prompt}" in base else len(base)
+        base[resume_index:resume_index] = rargs
     if rargs:
         note = M(lang, "resume_native", name=name, sid=session[:12])
     elif history:
@@ -1950,8 +1977,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             note += M(lang, "chat_note")
         cmd = [sys.executable, str(HERE / "arena_openai.py"), *options, *cmd[1:-1]]
     shown = " ".join(shlex.quote(a) for a in base)
-    out, log, t0, status = [], [], time.time(), "ok"
-    actual, errhead, sess = [""], [""], [""]
+    t0 = time.monotonic()
     run.emit({"tool": name, "type": "start", "cmd": shown, "model": model, "effort": effort})
     if attach:
         note += M(lang, "attach_note", n=attach_n or 1, chars=f"{len(attach):,}")
@@ -1960,10 +1986,40 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if stripped:  # e.g. ANTHROPIC_API_KEY would override the claude.ai subscription sign-in
         note += M(lang, "env_stripped", names=", ".join(stripped))
     if note:
-        log.append(note)
         run.emit({"tool": name, "type": "log", "data": note})
     if uses_openai:
         env["OPENAI_API_KEY"] = os.environ.get("ARENA_OPENAI_API_KEY", "")
+
+    def attempt(seconds):
+        return _stream_command(run, name, spec, cmd, cwd, seconds, lang, env, uses_openai, prompt)
+
+    status, output, attempt_log, actual, sess = attempt(timeout)
+    remaining = timeout - (time.monotonic() - t0)
+    if (name == "codex" and base[1:2] == ["exec"] and spec.get("resume_pos") == "prompt"
+            and rargs == ["resume", session] and UUID_RE.fullmatch(session)
+            and status.startswith("exit ") and not (sess or output or run.cancelled) and remaining > 0
+            and f"thread/resume failed: thread {session} already has an active writer" in attempt_log):
+        # Resume failed before a turn started. Fork the native history without taking over its writer.
+        notice = M(lang, "codex_writer_fork")
+        note += attempt_log + notice
+        run.emit({"tool": name, "type": "log", "data": notice})
+        base[resume_index] = cmd[resume_index] = "fork"
+        shown = " ".join(shlex.quote(a) for a in base)
+        status, output, attempt_log, actual, sess = attempt(remaining)
+    secs = round(time.monotonic() - t0, 1)
+    q("INSERT OR REPLACE INTO outputs(run_id, tool, status, seconds, output, log, cmd, model, actual_model, effort, session) "
+      "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      (run.id, name, status, secs, output, note + attempt_log, shown, model, actual, effort, sess))
+    run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
+    if status == "ok" and sess and (spec.get("continue_desktop") or spec.get("continue_antigravity") or (name == "codex" and spec.get("continue_url"))):
+        threading.Thread(target=desktop_sync, args=(run.id, lang, name), daemon=True).start()
+    _finish_tool(run, name)
+
+
+def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, prompt):
+    status = "ok"
+    out, log = [], []
+    actual, errhead, sess = [""], [""], [""]
     exe = sys.executable if uses_openai else which(cmd[0])
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     out_fd = None
@@ -2005,6 +2061,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             api_input.close()
     if p:
         run.procs[name] = p
+        if run.cancelled:
+            kill(p)
         parser = PARSERS[spec["parser"]](lang) if spec.get("parser") in PARSERS else None
         ptx = PtyText() if use_pty else None
 
@@ -2058,8 +2116,10 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             status = "timeout"
             kill(p)
             p.wait()
-        for th in ths:
+        for th, stream in zip(ths, (p.stdout, p.stderr)):
             th.join(5)
+            if stream is not None and not th.is_alive():
+                stream.close()
         if out_fd is not None:
             try:
                 os.close(out_fd)
@@ -2069,16 +2129,9 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
             status = "canceled"
         elif status == "ok" and p.returncode != 0:
             status = f"exit {p.returncode}"
-    secs = round(time.time() - t0, 1)
     if not p:
         run.emit({"tool": name, "type": "log", "data": "".join(log)})
-    q("INSERT OR REPLACE INTO outputs(run_id, tool, status, seconds, output, log, cmd, model, actual_model, effort, session) "
-      "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-      (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort, sess[0]))
-    run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
-    if status == "ok" and sess[0] and (spec.get("continue_desktop") or spec.get("continue_antigravity") or (name == "codex" and spec.get("continue_url"))):
-        threading.Thread(target=desktop_sync, args=(run.id, lang, name), daemon=True).start()
-    _finish_tool(run, name)
+    return status, "".join(out), "".join(log), actual[0], sess[0]
 
 
 def _finish_tool(run, name):
@@ -2248,6 +2301,11 @@ def start_judge(rid, model="", lang="en"):
             if i > 0 and base[i - 1].startswith("-"):
                 i -= 1
             base[i:i] = [spec["model_flag"], model]
+        if spec.get("judge_args"):  # e.g. claude --no-session-persistence: a scoring call is not kept as a session
+            i = base.index("{prompt}") if "{prompt}" in base else len(base)
+            if i > 0 and base[i - 1].startswith("-"):
+                i -= 1
+            base[i:i] = list(spec["judge_args"])
         cmd = [prompt if a == "{prompt}" else a for a in base]
         status, best, reason, result, raw = "error", "", "", {}, ""
         last = [0.0]
@@ -2255,7 +2313,8 @@ def start_judge(rid, model="", lang="en"):
         def progress(text):  # save the output so far every 2 seconds so the page can show progress
             if time.time() - last[0] > 2:
                 last[0] = time.time()
-                q("UPDATE judgments SET raw=?, seconds=? WHERE run_id=?", (text[-20000:], round(time.time() - t0, 1), rid))
+                shown = parsed_output(spec, text, lang)
+                q("UPDATE judgments SET raw=?, seconds=? WHERE run_id=?", (shown[-20000:], round(time.time() - t0, 1), rid))
 
         try:
             sec = cfg.get("judge_timeout", DEFAULT_CFG["judge_timeout"])
@@ -2264,6 +2323,7 @@ def start_judge(rid, model="", lang="en"):
                 rc, out, err = run_streaming(exe, cmd[1:], spec, tmp, sec, progress, grace=JUDGE_GRACE)
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
+            out = parsed_output(spec, out, lang)
             raw = out + ("\n[stderr]\n" + err if err.strip() else "")
             o = parse_judge(out) if rc == 0 else None
             if rc is None:
@@ -2304,6 +2364,8 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30):
     go on for up to `grace` more seconds, for as long as new output keeps arriving at least every `quiet` seconds.
     A command that has printed nothing, or has gone silent, is stopped at `timeout` as before."""
     env = child_env()
+    for k in spec.get("strip_env") or []:  # e.g. ANTHROPIC_API_KEY would override the subscription sign-in
+        env.pop(k, None)
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     buf, err, out_fd = [], [], None
     last_out = [0.0]  # when output last arrived
@@ -2558,7 +2620,8 @@ class H(BaseHTTPRequestHandler):
                                       "default_on": v.get("default_on", True),
                                       "ready": v.get("transport") != "openai_responses" or openai_ready()}
                                   for k, v in cfg["tools"].items()},
-                        "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags,
+                        "order": enabled_tools(cfg), "judge": judge_tool(cfg), "judge_default": default_judge(cfg),
+                        "judge_choices": judge_choices(cfg), "tags": tags,
                         "models_refreshing": bool(MODELS_PENDING or MODELS_LOCK.locked()),
                         "desktop_sync": {"available": any(v.get("continue_desktop") for v in cfg["tools"].values()),
                                          "on": bool(get_setting("desktop_sync", False)),
@@ -2658,7 +2721,15 @@ class H(BaseHTTPRequestHandler):
             for key in keys:
                 if key in b:
                     set_setting(key, bool(b[key]))
-            return self._json({key: bool(get_setting(key, False)) for key in keys})
+            if "judge_tool" in b:  # the scoring model; must be one of the tools that can score
+                cfg = load_cfg()
+                want = str(b["judge_tool"] or "")
+                if want and want not in judge_choices(cfg):
+                    return self._json({"error": M(self.lang, "judge_none")}, 400)
+                set_setting("judge_tool", want)
+            res = {key: bool(get_setting(key, False)) for key in keys}
+            res["judge_tool"] = judge_tool(load_cfg())
+            return self._json(res)
         if p == "/api/continue":
             try:
                 ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
@@ -3217,6 +3288,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="bar" id="openaiPreference" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
   </div>
+  <div class="bar" id="judgePref" hidden>
+    <label class="chatopt"><span data-i18n="e.judgeTool">Scoring model</span><select id="judgeTool" aria-label="Scoring model"></select></label>
+    <span class="note-s" data-i18n="e.judgeToolNote" style="margin:0;max-width:760px"></span>
+  </div>
   <div class="bar" id="desktopPref" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
     <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
@@ -3711,14 +3786,14 @@ function deanon(t,map){  // map the anonymous labels in Grok's comments (Answer 
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
 }
 function renderJudge(r,j){
-  r.judge=j;const name=esc(tname(CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
+  r.judge=j;const name=esc(tname(j.judge||CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
   const busy=j.running||j.status==='running';
-  b.disabled=busy;b.textContent=busy?T('j.busy',tname(CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
+  b.disabled=busy;b.textContent=busy?T('j.busy',tname(j.judge||CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
   res.classList.toggle('err',j.status==='error');res.title='';
   for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
   {const d=$('.dis',r.el);if(d&&j.status!=='ok'){d.hidden=true;d.innerHTML=''}}
   if(busy){const tail=clean(j.raw||'').trim().split('\n').filter(Boolean).pop()||'';
-    res.textContent=T('j.sending',tname(CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
+    res.textContent=T('j.sending',tname(j.judge||CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
     res.title=tail?T('j.last',tail.slice(-300)):'';return}
   if(j.status==='error'){res.textContent=T('j.fail',j.reason||T('j.unknown'));res.title=(j.raw||'').slice(-2000);return}
   if(j.status!=='ok'){res.textContent='';return}
@@ -3728,7 +3803,7 @@ function renderJudge(r,j){
   const best=j.best==='tie'?T('tie'):j.best?tname(j.best):T('j.none');
   const agree=r.winner&&j.best?(r.winner===j.best?`<span class="agree">${T('j.agree')}</span>`:''):'';
   renderConflicts(r,j);
-  const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
+  const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(j.judge||CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
 }
 
 function renderConflicts(r,j){  // consensus and conflicts: each tool's position sits under that tool's answer column
@@ -3906,6 +3981,16 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if((CFG.judge_choices||[]).length){  // Setup page: which tool scores the answers (Grok by default)
+    const sel=$('#judgeTool');$('#judgePref').hidden=false;sel.setAttribute('aria-label',T('e.judgeTool'));
+    sel.innerHTML=CFG.judge_choices.map(t=>`<option value="${esc(t)}"${t===CFG.judge?' selected':''}>${esc(tname(t)+(t===CFG.judge_default?T('e.judgeDefault'):''))}</option>`).join('');
+    sel.onchange=async()=>{
+      const prev=CFG.judge;sel.disabled=true;
+      try{const d=await post('/api/settings',{judge_tool:sel.value});CFG.judge=d.judge_tool;JSEL.model='';ls.set('arenaJudge',JSEL);renderJudgeOpt()}
+      catch(e){sel.value=prev;toast(e)}
+      finally{sel.disabled=false}
+    };
+  }
   if(CFG.desktop_sync?.available){  // Setup page: add new Claude sessions to the Claude Desktop sidebar
     const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
     $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);

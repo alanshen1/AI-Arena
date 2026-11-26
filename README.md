@@ -1,6 +1,6 @@
 # AI Arena
 
-Send one question to **Claude Code**, **Codex** and **Antigravity CLI** at the same time and read their answers side by side. Rate them, follow up, let **Grok** score them anonymously, and build up your own statistics on which model does best at what.
+Send one question to **Claude Code**, **Codex** and **Antigravity CLI** at the same time and read their answers side by side. Rate them, follow up, let **Grok** (or another model you choose) score them anonymously, and build up your own statistics on which model does best at what.
 
 AI Arena runs locally as a single Python file with no dependencies beyond the standard library. The interface is available in English, Chinese and Japanese.
 
@@ -13,15 +13,15 @@ AI Arena runs locally as a single Python file with no dependencies beyond the st
 - **Attachments**: click the paperclip, drag files onto the question box, or paste them, to attach Word, Excel, PowerPoint, PDF, CSV, text or image files (up to 50 MB each), on the first question or a follow-up. AI Arena extracts the text and sends the same content to every tool, so the comparison stays fair. It also gives each tool the path of the original file so it can open images, charts or layout itself. Attachments show on each round and open with a click; **Rerun** reuses them, and Grok sees the same text when scoring. See [Attachments](#attachments).
 - **Model and effort per tool**: pick a model and an effort level for each tool. Your choices are remembered. Antigravity's list is read from `agy models` at startup, so it shows the models your Google plan includes (for example Gemini 4 Neon), and the last list is cached in `models_cache.json`.
 - **Optional OpenAI GPT column**: compare GPT-6.2 Sol or Astra through the OpenAI Responses API. It is hidden unless you set `ARENA_OPENAI_API_KEY` and turn on **Show OpenAI GPT** on the Setup page. It uses separate API credits, not a ChatGPT subscription. See [OpenAI API column](#openai-api-column).
-- **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If a tool has no session ID from the last round, the earlier Q&A is added before the question instead. With **Include the other answers** (on by default), each tool also gets the other models' answers from the previous round, labeled by model, so you can ask them to compare, critique or combine the answers. Turn it off when you want each tool to answer on its own; rounds that saw the other answers are marked.
+- **Follow-up questions**: ask a follow-up under any round and each tool continues its own session (`claude --resume`, `codex exec resume`, `agy --conversation`). If Codex reports that its session is still held by another process (for example the Codex App), Arena forks the session with its full history (`codex exec fork`) and answers there, instead of failing. If a tool has no session ID from the last round, the earlier Q&A is added before the question instead. With **Include the other answers** (on by default), each tool also gets the other models' answers from the previous round, labeled by model, so you can ask them to compare, critique or combine the answers. Turn it off when you want each tool to answer on its own; rounds that saw the other answers are marked.
 - **Continue in the tool itself**: the arrow button on each answer opens that session outside Arena. Claude continues in **Claude Desktop** (`claude --desktop --resume`), Codex opens in the **Codex App** (`codex://threads/<id>`), and every tool can continue in **Terminal** or copy its resume command. See [Continuing a session](#continuing-a-session).
 - **Prompt library**: a panel on the right (click **Prompts** in the top bar) holds reusable prompts. Click one to insert it into the question box or follow-up box you used last. It comes with 57 built-in prompts in 13 categories (learning, writing, coding, decisions, work, research, fact-checking, follow-ups, documents, translation, everyday life, prompting, and reasoning tests for comparing the models on hard problems), shown in the interface language. Mark the parts you change each time as `{{placeholder}}`: the first one is selected after inserting, and Tab jumps to the next. Search, filter by category, pin, edit, delete, or save what you typed with **Save input**. See [Prompt library](#prompt-library).
 - **Conversation feed**: each card is a conversation. Older rounds fold automatically, and a three-color bar on each card shows how each tool did in the latest round.
 - **Reader mode**: expand long answers in place, or open a wide reading view and use ← → to switch between models.
-- **Anonymous scoring by Grok**: after a round (automatically or on demand), the successful answers are shuffled, relabeled A/B/C and sent to Grok. Grok scores accuracy, completeness, clarity and usefulness and picks a best answer. Grok does not compete, which avoids a model favoring its own style. In the same call Grok also lists **disagreements and agreement**: each point where the answers differ (marked as conflicting facts, different advice or different emphasis), what each tool says, placed under that tool's column, and which position Grok finds more credible or how to check it, followed by the points all answers agree on. While it works, the page shows the elapsed time; scoring usually takes one to three minutes because Grok checks the facts in each answer.
+- **Anonymous scoring by Grok**: after a round (automatically or on demand), the successful answers are shuffled, relabeled A/B/C and sent to Grok. Grok scores accuracy, completeness, clarity and usefulness and picks a best answer. Grok does not compete, which avoids a model favoring its own style. In the same call Grok also lists **disagreements and agreement**: each point where the answers differ (marked as conflicting facts, different advice or different emphasis), what each tool says, placed under that tool's column, and which position Grok finds more credible or how to check it, followed by the points all answers agree on. While it works, the page shows the elapsed time; scoring usually takes one to three minutes because Grok checks the facts in each answer. To score with another model, pick **Scoring model** on the Setup page: Claude, Codex or Antigravity can score too (Grok stays the default). A scoring model that also answered the round sees its own answer among the anonymized ones and may favor it.
 - **Your ratings and stats**: give 1–5 stars, notes, and a best or tie for each round. The Stats page summarizes average score, win rate, time and length by tool, or by tool, model and effort, plus Grok's scores and how often your pick matches Grok's.
 - **History**: search (including follow-ups), filter by tag, reopen or rerun.
-- **Setup page**: checks whether each CLI is installed, installs missing ones into `~/.ai-arena` with one click (no admin rights needed), and opens Terminal for the one-time sign-in.
+- **Setup page**: checks whether each CLI is installed, installs missing ones into `~/.ai-arena` with one click (no admin rights needed), and opens Terminal for the one-time sign-in. It also holds the settings: the **Scoring model**, whether the OpenAI column is shown, and whether new conversations are added to Claude Desktop, Codex App and Antigravity App.
 - **macOS app**: double-click to start; it quits by itself after 15 idle minutes. Light and dark mode follow your system.
 - **English, Chinese and Japanese**: switch languages from the top-right corner. Everything follows the selected language: the interface, error messages and process logs, the instructions sent to the models, Grok's scoring prompt and comments, and the built-in prompts. All text lives in `locales/*.json`, so you can fix wording or add a language without touching the code. See [Languages](#languages).
 
@@ -115,7 +115,7 @@ All text is stored in `locales/<code>.json`. `arena.py`, `arena.html` and `arena
 | `msg` | Backend messages: errors and process log lines |
 | `tools` | Sign-in hints and default model names for the built-in tools |
 | `model` | Text sent to the models: chat-mode instructions, attachment, follow-up and history templates |
-| `judge` | Grok's scoring prompt |
+| `judge` | The scoring prompt, used by whichever scoring model is selected |
 | `parse` | Words used to read model output in that language (for example the word for "Answer" or "tie") |
 | `openai` | Error messages of the OpenAI column |
 | `launcher` | Dialogs of the macOS app (read with `plutil`, so they work even without Python) |
@@ -166,11 +166,12 @@ Created on first run and excluded by `.gitignore`:
 | `workspace` (top level) | Folder the tools run in when no working folder is set; default `~/AI Arena` |
 | `continue_app`, `continue_desktop`, `continue_url`, `continue_terminal` | How the arrow button continues a session: the app's name, CLI arguments that open the desktop app, a deep link, and CLI arguments for Terminal. `{session}` is replaced with the session ID |
 | `models_cmd` | Command that lists available models at runtime, e.g. `agy models` (runs in a pseudo-terminal when `pty` is set; the result is logged to `arena.log`) |
-| `strip_env` | Environment variables removed before the tool starts. Claude removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so it always uses your claude.ai sign-in |
+| `strip_env` | Environment variables removed before the tool starts (also when it scores or lists models). Claude removes `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so it always uses your claude.ai sign-in |
 | `default_on: false` | Leave the tool unselected for new questions |
 | `pty: true` | Run in a pseudo-terminal (Antigravity CLI can hang without a terminal) |
 | `install_script` / `package` | One-click install method: a shell script, or an npm package |
-| `role: "judge"` | Use this tool for scoring instead of competing (Grok by default) |
+| `role: "judge"` | Use this tool for scoring only, instead of competing (Grok by default). Any competing CLI tool can also score: pick it under **Scoring model** on the Setup page |
+| `judge_args` | Extra arguments when the tool scores, e.g. Claude's `--no-session-persistence`, so scoring calls are not kept as sessions |
 | `enabled: false` | Turn a tool off |
 
 ## Troubleshooting
@@ -182,12 +183,14 @@ Created on first run and excluded by `.gitignore`:
 | AI Arena exits with **locales/en.json is missing** | The `locales` folder must sit next to `arena.py`. Copy it from the repository when you update. |
 | Claude fails with **Invalid API key** | An `ANTHROPIC_API_KEY` from the environment took priority over your claude.ai sign-in. AI Arena now removes it before starting Claude (the process log says so). If it still fails, the key comes from somewhere else, such as `apiKeyHelper` in `~/.claude/settings.json`; run `claude` and type `/status` to see which sign-in it uses. Start AI Arena from the app rather than from another AI tool's terminal, which may carry its own keys. |
 | Antigravity's model list only shows **Default** | `agy models` needs a signed-in session. Sign in on the Setup page and restart AI Arena. If the list is still empty, `arena.log` contains the raw output of `agy models`. |
+| A Codex follow-up says the session is **already in use** | The Codex App or another `codex` process still holds the session. Arena forks it automatically and the log says so; the answer continues in the new session, which the arrow button then opens. |
 | Codex stays on **Generating** for a long time | Codex waits instead of failing when you are not signed in. Click **Sign in** for Codex on the Setup page. |
 | An answer column is empty but marked **Done** | Open its **Process log**. If the output format was not recognized, the raw output is written there. |
 | An attachment says **No text extracted** | It is an image, a scanned PDF or an unsupported format. The tools still get the file path. For a PDF on Linux, install `poppler-utils` for `pdftotext`. |
-| Grok scoring takes minutes | This is normal; Grok verifies facts before it answers. To save time and quota, turn off auto-score and click **Ask Grok to score and compare** only on rounds you care about, or pick a faster model next to the auto-score switch. |
+| Grok scoring takes minutes | This is normal; Grok verifies facts before it answers. To save time and quota, turn off auto-score and click the scoring button only on rounds you care about, pick a faster model next to the auto-score switch, or choose another **Scoring model** on the Setup page. |
 | Scoring shows **failed** or **interrupted** | Hover over the message to see Grok's raw reply, then click **Retry scoring**. Scoring is interrupted if the background service restarts while it runs. |
 | Grok scoring stops working | Grok uses your subscription's shared weekly usage pool (Grok Build, chat, images and voice combined). Paid features pause until the weekly limit resets. |
+| Scoring fails on complex questions | Long rounds can exceed `judge_timeout` (900 seconds by default), or Grok's usage limit is reached (`402` or `429` in the raw reply). Pick another **Scoring model** on the Setup page and click **Retry scoring**. |
 | A new feature does not appear after an update | Click **Quit** and start AI Arena again; see [Updating](#updating). |
 
 ## Privacy and safety
@@ -196,7 +199,7 @@ Created on first run and excluded by `.gitignore`:
 - Model output is sanitized with DOMPurify before it is rendered.
 - Scoring hides which model wrote each answer, but an answer that names itself (for example, "As Claude…") can still give it away.
 - The OpenAI API key is read only from the environment, passed only to the OpenAI request process, and never stored. Claude, Codex and Antigravity do not see it.
-- Attachments stay on your computer, but their content is sent to every selected tool (and to Grok when scoring). Don't attach anything you would not paste into those services.
+- Attachments stay on your computer, but their content is sent to every selected tool (and to the scoring model). Don't attach anything you would not paste into those services.
 - If you set a working folder, the CLIs may change files in it. When comparing coding tasks, point it at a copy.
 
 ## Screenshots

@@ -411,6 +411,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
   <div class="bar" id="openaiPreference" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="showOpenai"><span data-i18n="e.showOpenai">Show OpenAI GPT</span></label><span class="note-s" id="openaiKeyNote" style="margin:0" hidden data-i18n="e.openaiNoKey">Set ARENA_OPENAI_API_KEY first; until then this column stays hidden in Compare</span>
   </div>
+  <div class="bar" id="judgePref" hidden>
+    <label class="chatopt"><span data-i18n="e.judgeTool">Scoring model</span><select id="judgeTool" aria-label="Scoring model"></select></label>
+    <span class="note-s" data-i18n="e.judgeToolNote" style="margin:0;max-width:760px"></span>
+  </div>
   <div class="bar" id="desktopPref" hidden>
     <label class="chatopt"><input type="checkbox" role="switch" id="desktopSync"><span data-i18n="e.desktopSync">Add new conversations to Claude Desktop</span></label>
     <span class="note-s" id="desktopSyncNote" style="margin:0;max-width:760px"></span>
@@ -905,14 +909,14 @@ function deanon(t,map){  // map the anonymous labels in Grok's comments (Answer 
     .replace(/(^|[^A-Za-z0-9])([A-H])(?=\s*(?:[\u4e00-\u9fff，。、：；！？,.;:!?）)]|$))/g,(m,p,l)=>nm(l)?p+nm(l):m);
 }
 function renderJudge(r,j){
-  r.judge=j;const name=esc(tname(CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
+  r.judge=j;const name=esc(tname(j.judge||CFG.judge||'grok')),b=$('.jbtn',r.el),res=$('.jres',r.el);if(!res)return;
   const busy=j.running||j.status==='running';
-  b.disabled=busy;b.textContent=busy?T('j.busy',tname(CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
+  b.disabled=busy;b.textContent=busy?T('j.busy',tname(j.judge||CFG.judge)):j.status==='ok'?T('j.again'):j.status?T('j.retry'):T('j.ask',tname(CFG.judge));
   res.classList.toggle('err',j.status==='error');res.title='';
   for(const t of r.tools){const jd=$('.jd',r.S[t].el);jd.hidden=true;jd.innerHTML=''}
   {const d=$('.dis',r.el);if(d&&j.status!=='ok'){d.hidden=true;d.innerHTML=''}}
   if(busy){const tail=clean(j.raw||'').trim().split('\n').filter(Boolean).pop()||'';
-    res.textContent=T('j.sending',tname(CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
+    res.textContent=T('j.sending',tname(j.judge||CFG.judge||'grok'))+(j.elapsed!=null?'  '+T('j.elapsed',Math.round(j.elapsed)):'');
     res.title=tail?T('j.last',tail.slice(-300)):'';return}
   if(j.status==='error'){res.textContent=T('j.fail',j.reason||T('j.unknown'));res.title=(j.raw||'').slice(-2000);return}
   if(j.status!=='ok'){res.textContent='';return}
@@ -922,7 +926,7 @@ function renderJudge(r,j){
   const best=j.best==='tie'?T('tie'):j.best?tname(j.best):T('j.none');
   const agree=r.winner&&j.best?(r.winner===j.best?`<span class="agree">${T('j.agree')}</span>`:''):'';
   renderConflicts(r,j);
-  const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
+  const why=deanon(j.reason,j.mapping);res.innerHTML=`${esc(T('j.best',tname(j.judge||CFG.judge||'grok')))}<b>${esc(best)}</b>${agree}${why?esc(T('j.sep'))+esc(why):''}`;res.title=why;
 }
 
 function renderConflicts(r,j){  // consensus and conflicts: each tool's position sits under that tool's answer column
@@ -1100,6 +1104,16 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   try{CFG=await api('/api/config')}catch(e){toast(e);return}
   const saved=ls.get('arenaSel',{});CUSTOM=ls.get('arenaCustom',{});
   for(const t of CFG.order)SEL[t]={on:CFG.tools[t].ready!==false&&(saved[t]?.on??CFG.tools[t].default_on??true),model:saved[t]?.model??'',effort:saved[t]?.effort??''};
+  if((CFG.judge_choices||[]).length){  // Setup page: which tool scores the answers (Grok by default)
+    const sel=$('#judgeTool');$('#judgePref').hidden=false;sel.setAttribute('aria-label',T('e.judgeTool'));
+    sel.innerHTML=CFG.judge_choices.map(t=>`<option value="${esc(t)}"${t===CFG.judge?' selected':''}>${esc(tname(t)+(t===CFG.judge_default?T('e.judgeDefault'):''))}</option>`).join('');
+    sel.onchange=async()=>{
+      const prev=CFG.judge;sel.disabled=true;
+      try{const d=await post('/api/settings',{judge_tool:sel.value});CFG.judge=d.judge_tool;JSEL.model='';ls.set('arenaJudge',JSEL);renderJudgeOpt()}
+      catch(e){sel.value=prev;toast(e)}
+      finally{sel.disabled=false}
+    };
+  }
   if(CFG.desktop_sync?.available){  // Setup page: add new Claude sessions to the Claude Desktop sidebar
     const sw=$('#desktopSync');$('#desktopPref').hidden=false;sw.checked=!!CFG.desktop_sync.on;
     $('#desktopSyncNote').textContent=T('e.desktopSyncNote',CFG.desktop_sync.folder);

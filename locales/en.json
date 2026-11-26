@@ -243,7 +243,10 @@
   "e.codexDesktopOpenNote": "Open the original conversation in the background after its first successful answer.",
   "e.desktopSyncNote": "After the first round of each new conversation, Claude's session is added to the \"{0}\" group in the Claude Desktop sidebar, once per session. Claude Desktop opens the session when it is added. Needs Claude Code v2.1.285 or later and a Claude subscription sign-in.",
   "e.antigravityDesktopSync": "Sync conversations to Antigravity App",
-  "e.antigravityDesktopSyncNote": "After each successful round, automatically sync Antigravity's full Q&A into the Antigravity desktop app, under the project for the folder that round ran in (\"{0}\" when no working folder is set), so you can view and continue it there. A conversation you continue in the desktop app is not overwritten afterwards."
+  "e.antigravityDesktopSyncNote": "After each successful round, automatically sync Antigravity's full Q&A into the Antigravity desktop app, under the project for the folder that round ran in (\"{0}\" when no working folder is set), so you can view and continue it there. A conversation you continue in the desktop app is not overwritten afterwards.",
+  "e.judgeTool": "Scoring model",
+  "e.judgeDefault": " (default)",
+  "e.judgeToolNote": "The model that scores the answers and finds disagreements. Grok by default; if scoring is slow or fails on complex questions, switch to Claude, Codex or Antigravity. Answers reach the scoring model anonymized and shuffled, but a scoring model that also answered the round may favor its own answer."
  },
  "msg": {
   "detect_timeout": "(check timed out)",
@@ -271,6 +274,7 @@
   "tag_step": "[step] ",
   "tag_status": "[status] ",
   "agy_raw": "[raw output] Could not parse an answer from agy's output. Raw output:\n",
+  "codex_writer_fork": "[resume] Another writer holds this Codex session. Continuing in a new branch with its history.\n",
   "resume_native": "[resume] Continuing {name}'s own session {sid}…\n",
   "resume_transcript": "[resume] No session ID from the last round, so the previous {n} round(s) of Q&A were added before the question\n",
   "cmd_missing": "Command not found: {exe}\nSee the Setup page for the searched PATH. Install it there, or put the full path in {cfg}.\n",

@@ -249,7 +249,10 @@
   "e.codexDesktopOpenNote": "第一轮成功回答后，在后台打开原会话。",
   "e.desktopSyncNote": "每个新对话的第一轮完成后，把 Claude 的会话加入 Claude Desktop 侧边栏的「{0}」分组，每个会话只加一次。加入时 Claude Desktop 会打开这个会话。需要 Claude Code v2.1.285 或以上，并用 Claude 订阅登录。",
   "e.antigravityDesktopSync": "对话自动同步到 Antigravity 桌面应用",
-  "e.antigravityDesktopSyncNote": "每轮成功回答后，自动把 Antigravity 的完整问答同步到 Antigravity 桌面应用中该轮工作文件夹对应的项目（未指定工作文件夹时是「{0}」），可直接在桌面端查看并继续追问。在桌面端追问过的会话不会再被覆盖。"
+  "e.antigravityDesktopSyncNote": "每轮成功回答后，自动把 Antigravity 的完整问答同步到 Antigravity 桌面应用中该轮工作文件夹对应的项目（未指定工作文件夹时是「{0}」），可直接在桌面端查看并继续追问。在桌面端追问过的会话不会再被覆盖。",
+  "e.judgeTool": "评分模型",
+  "e.judgeDefault": "（默认）",
+  "e.judgeToolNote": "给答案打分和找分歧的模型。默认用 Grok；复杂问题评分慢或失败时，可以换成 Claude、Codex 或 Antigravity。答案是匿名、打乱顺序后交给评分模型的，但如果评分模型这一轮也在作答，它可能会偏向自己的回答。"
  },
  "msg": {
   "detect_timeout": "（检测超时）",
@@ -277,6 +280,7 @@
   "tag_step": "[步骤] ",
   "tag_status": "[状态] ",
   "agy_raw": "[原始输出] 没能从 agy 的输出里解析出回答，原始内容如下：\n",
+  "codex_writer_fork": "[续接] 原 Codex 会话正被占用，正在从原会话创建分支，携带历史继续回答。\n",
   "resume_native": "[续接] 沿用 {name} 自己的会话 {sid}…\n",
   "resume_transcript": "[续接] 没有拿到上一轮的会话 ID，改为把之前 {n} 轮问答附在问题前面\n",
   "cmd_missing": "找不到命令: {exe}\n已搜索的 PATH 见「环境」页。可在那里一键安装，或把完整路径写进 {cfg}。\n",

@@ -55,6 +55,39 @@ class CoreCase(ArenaCase):
         return resp.status, payload
 
 
+class CodexWriterConflict(CoreCase):
+    def test_locked_resume_forks_once_and_keeps_the_followup(self):
+        sid = "11111111-2222-3333-4444-555555555555"
+        child = "22222222-2222-3333-4444-555555555555"
+        cli = self.tmp / "codex"
+        cli.write_text("""#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+args = sys.argv[1:]
+with Path("calls").open("a") as f:
+    print(json.dumps(args), file=f)
+if "resume" in args:
+    print(f"Error: thread/resume: thread/resume failed: thread {args[-2]} already has an active writer (code -32600)", file=sys.stderr)
+    sys.exit(1)
+print(json.dumps({"type":"thread.started", "thread_id":"22222222-2222-3333-4444-555555555555"}))
+print(json.dumps({"type":"item.completed", "item":{"type":"agent_message","text":"answer"}}))
+""")
+        cli.chmod(0o700)
+        spec = dict(arena.DEFAULT_CFG["tools"]["codex"], cmd=[str(cli), "exec", "--json", "{prompt}"], continue_url="")
+        run = arena.Run("conflict", ["codex"])
+        arena.exec_tool(run, "codex", spec, "question", str(self.folder), 10, "model", "low", sid,
+                        chat=True, peers=[("peer", "peer answer")], attach="attachment text")
+        row = arena.q("SELECT * FROM outputs WHERE run_id=?", (run.id,), one=True)
+        self.assertEqual((row["status"], row["session"], row["output"]), ("ok", child, "answer"))
+        calls = [json.loads(line) for line in (self.folder / "calls").read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][-3:-1], ["resume", sid])
+        self.assertEqual(calls[1], calls[0][:-3] + ["fork", sid, calls[0][-1]])
+        for fragment in ("question", "peer answer", "attachment text"):
+            self.assertIn(fragment, calls[1][-1])
+        self.assertEqual(sum(ev["type"] == "done" for ev in run.events), 1)
+
+
 class WorkingFolder(CoreCase):
     SPEC = {"cmd": ["echo", "{prompt}"]}
 
@@ -312,3 +345,27 @@ class Page(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScoringModelCase(CoreCase):
+    """The scoring model is chosen on the Setup page; Grok stays the default."""
+
+    def test_default_is_grok_and_a_choice_sticks(self):
+        cfg = arena.load_cfg()
+        self.assertEqual(arena.judge_tool(cfg), "grok")
+        self.assertIn("claude", arena.judge_choices(cfg))
+        self.assertNotIn("openai", arena.judge_choices(cfg))  # the opt-in API column cannot score
+        arena.set_setting("judge_tool", "claude")
+        self.assertEqual(arena.judge_tool(cfg), "claude")
+        arena.set_setting("judge_tool", "no-such-tool")  # an unknown value falls back to the default
+        self.assertEqual(arena.judge_tool(cfg), "grok")
+
+    def test_stream_output_is_parsed_before_reading_the_verdict(self):
+        verdict = {"scores": {"A": {"overall": 4}}, "best": "A"}
+        text = "```json\n" + json.dumps(verdict) + "\n```"
+        raw = "\n".join(json.dumps({"type": "stream_event", "event": {"type": "content_block_delta",
+                                    "delta": {"type": "text_delta", "text": text[i:i + 7]}}})
+                        for i in range(0, len(text), 7))
+        self.assertIsNone(arena.parse_judge(raw))  # the JSON is split across escaped stream events
+        out = arena.parsed_output(arena.load_cfg()["tools"]["claude"], raw)
+        self.assertEqual(arena.parse_judge(out)["best"], "A")
