@@ -419,6 +419,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <label class="chatopt"><input type="checkbox" role="switch" id="codexDesktopOpen"><span data-i18n="e.codexDesktopOpen">Open new conversations in Codex App</span></label>
     <span class="note-s" data-i18n="e.codexDesktopOpenNote" style="margin:0;max-width:760px"></span>
   </div>
+  <div class="bar" id="antigravityDesktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="antigravityDesktopSync"><span data-i18n="e.antigravityDesktopSync">Sync conversations to Antigravity App</span></label>
+    <span class="note-s" id="antigravityDesktopSyncNote" style="margin:0;max-width:760px"></span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -534,18 +538,20 @@ const effName=e=>{const l=TT('eff.'+e);return l&&l!==e?l:''};  // localized effo
 const effLabel=e=>e?`${e} ${effName(e)}`.trim():'';
 const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
+/* A model ID that already names its level (gemini-4-neon-high) fixes the effort: the picker shows that level and is disabled, and the server sends no separate effort flag. */
+const modelEffort=t=>{const m=/-(minimal|low|medium|high|xhigh|max)$/.exec(SEL[t]?.model||'');return m&&(CFG.tools[t].efforts||[]).includes(m[1])?m[1]:''};
 function renderLanes(){
   const tools=visibleTools();
   $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
-  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t];
+  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t],own=modelEffort(t);
     const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
       <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
       <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
-      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
-        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
+      ${(v.efforts||[]).length?`<select class="eff${own||sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false||own?'disabled':''}>
+        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===(own||sel.effort)?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
   if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
@@ -825,12 +831,17 @@ function ppInit(){
   if(ls.get('arenaPP',false))ppOpen(true);
 }
 
-/* ---------- Dynamic model lists (agy models is read in the background and added to the picker when ready) ---------- */
-function modelsLater(n){
-  if(n>=6||!CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length))return;
-  setTimeout(async()=>{try{const c=await api('/api/config');let got=false;
-    for(const t of CFG.order)if(CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length&&(c.tools[t]?.models||[]).length){CFG.tools[t].models=c.tools[t].models;got=true}
-    if(got)renderLanes()}catch(e){}modelsLater(n+1)},10000);
+/* ---------- Dynamic model lists (agy models is read in the background and synced to the picker when ready) ---------- */
+let modelsT=0;
+function modelsLater(n=0){
+  clearTimeout(modelsT);
+  const hasDyn=CFG.order.some(t=>CFG.tools[t].dynamic);
+  const needEmpty=CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length);
+  if(!hasDyn||n>=20||(!CFG.models_refreshing&&!needEmpty))return;
+  modelsT=setTimeout(async()=>{try{const c=await api('/api/config');CFG.models_refreshing=!!c.models_refreshing;let got=false;
+    for(const t of CFG.order){if(!CFG.tools[t].dynamic)continue;const next=c.tools[t]?.models||[];
+      if(next.length&&JSON.stringify(CFG.tools[t].models||[])!==JSON.stringify(next)){CFG.tools[t].models=next;got=true}}
+    if(got)renderLanes()}catch(e){}modelsLater(n+1)},n<4?2500:5000);
 }
 
 /* ---------- Attachments ---------- */
@@ -1018,7 +1029,7 @@ async function loadHistory(){
 }
 $('#hlist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.id;
   if(b.dataset.a==='open')openRun(id).catch(toast);
-  else if(confirm(T('h.confirm'))){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
+  else if(confirm(T('h.confirm'))){try{await post('/api/delete/'+encodeURIComponent(id))}catch(err){toast(err);return}const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
 let hqT;$('#hq').oninput=()=>{clearTimeout(hqT);hqT=setTimeout(loadHistory,250)};$('#htag').onchange=loadHistory;
 
 /* ---------- Stats ---------- */
@@ -1048,6 +1059,7 @@ let jobT=0;
 async function loadEnv(){
   $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
+  CFG.models_refreshing=true;modelsLater(0);
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
@@ -1103,6 +1115,22 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
       try{
         const d=await post('/api/settings',{codex_desktop_open:selected});
         sw.checked=!!d.codex_desktop_open;
+      }catch(e){sw.checked=!selected;toast(e)}
+      finally{sw.disabled=false}
+    };
+  }
+  if(CFG.antigravity_desktop_sync?.available){
+    const sw=$('#antigravityDesktopSync');
+    $('#antigravityDesktopPref').hidden=false;
+    sw.checked=!!CFG.antigravity_desktop_sync.on;
+    $('#antigravityDesktopSyncNote').textContent=T('e.antigravityDesktopSyncNote',CFG.antigravity_desktop_sync.folder);
+    sw.onchange=async()=>{
+      const selected=sw.checked;
+      sw.disabled=true;
+      try{
+        const d=await post('/api/settings',{antigravity_desktop_sync:selected});
+        CFG.antigravity_desktop_sync.on=!!d.antigravity_desktop_sync;
+        sw.checked=CFG.antigravity_desktop_sync.on;
       }catch(e){sw.checked=!selected;toast(e)}
       finally{sw.disabled=false}
     };

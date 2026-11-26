@@ -247,7 +247,9 @@
   "e.desktopSync": "新对话自动加入 Claude Desktop",
   "e.codexDesktopOpen": "在 Codex App 自动打开新对话",
   "e.codexDesktopOpenNote": "第一轮成功回答后，在后台打开原会话。",
-  "e.desktopSyncNote": "每个新对话的第一轮完成后，把 Claude 的会话加入 Claude Desktop 侧边栏的「{0}」分组，每个会话只加一次。加入时 Claude Desktop 会打开这个会话。需要 Claude Code v2.1.285 或以上，并用 Claude 订阅登录。"
+  "e.desktopSyncNote": "每个新对话的第一轮完成后，把 Claude 的会话加入 Claude Desktop 侧边栏的「{0}」分组，每个会话只加一次。加入时 Claude Desktop 会打开这个会话。需要 Claude Code v2.1.285 或以上，并用 Claude 订阅登录。",
+  "e.antigravityDesktopSync": "对话自动同步到 Antigravity 桌面应用",
+  "e.antigravityDesktopSyncNote": "每轮成功回答后，自动把 Antigravity 的完整问答同步到 Antigravity 桌面应用中该轮工作文件夹对应的项目（未指定工作文件夹时是「{0}」），可直接在桌面端查看并继续追问。在桌面端追问过的会话不会再被覆盖。"
  },
  "msg": {
   "detect_timeout": "（检测超时）",
@@ -312,6 +314,9 @@
   "codex_desktop_opened": "[{app}] 已请求桌面应用打开原会话。\n",
   "codex_desktop_open_failed": "[{app}] 无法打开会话：{msg}\n",
   "desktop_sync_fail": "[{app}] 没能加入：{msg}\n",
+  "antigravity_desktop_synced": "[{app}] 已同步到 {app} 桌面应用的「{folder}」项目\n",
+  "antigravity_desktop_sync_failed": "[{app}] 同步到桌面应用失败：{msg}\n",
+  "antigravity_desktop_conflict": "桌面端的这段会话在上次同步后有新内容，为避免覆盖，本次没有同步。",
   "title_note": "[标题] {title}\n"
  },
  "tools": {
@@ -677,6 +682,21 @@
    "提示词",
    "写系统提示词",
    "帮我为一个用于 {{用途}} 的 AI 助手写系统提示词：说明它的角色、目标用户、回答风格、必须遵守的规则和不该做的事，并给出两段示例对话。"
+  ],
+  "reason-monty4": [
+   "推理测试",
+   "概率陷阱：四门问题",
+   "有 4 扇门，其中 1 扇后面是汽车，另外 3 扇是山羊。你选了 1 号门。\n情况 A：主持人不知道汽车在哪，从你没选的 3 扇门里随机打开 1 扇，碰巧是山羊。\n情况 B：主持人知道汽车在哪，并且一定会从你没选的门里打开 1 扇山羊门（有多扇可选时随机选）。\n在两种情况下，你是坚持 1 号门，还是换到剩下两扇未开的门中的某一扇？分别算出每个选择赢得汽车的概率，并解释两种情况为什么不同。"
+  ],
+  "reason-simpson": [
+   "推理测试",
+   "数据陷阱：哪个方案更好",
+   "我们测试了两个客户成功方案，看客户一年后是否续约：\n- 大客户：方案 A 300 家，续约 270 家；方案 B 100 家，续约 95 家\n- 小客户：方案 A 100 家，续约 20 家；方案 B 300 家，续约 90 家\n每个客户用哪个方案，是由负责的销售自己决定的。\n老板看了总数说\"A 的续约率明显更高，全面推广 A\"。你同意吗？请给出你的判断、依据，以及在做决定之前还需要什么数据或实验。"
+  ],
+  "reason-fermi": [
+   "推理测试",
+   "开放估算：无人出租车数量",
+   "如果把东京所有出租车都换成自动驾驶车辆，需要多少辆车才能维持现在的服务水平（等车时间不变）？\n请把问题拆开估算，写明每个假设和取值依据，给出一个数量范围，并指出结论对哪个假设最敏感、那个假设变化后结论会怎样变。"
   ]
  },
  "launcher": {

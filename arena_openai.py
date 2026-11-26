@@ -1,4 +1,11 @@
-"""Run one OpenAI Responses API request for Arena's subprocess runner."""
+"""Run one OpenAI Responses API request for Arena's subprocess runner.
+
+Exception to the "no hosted LLM API" rule in ../CLAUDE.md, recorded on 2026-11-26 when a code review
+flagged it and the project owner chose to keep the lane: Arena exists to compare vendors side by side, and OpenAI's API models have no local CLI to
+route through. The lane is opt-in: it is off by default ("default_on": false) and does nothing unless
+ARENA_OPENAI_API_KEY is set. This file is the only place in the project that calls a hosted LLM API;
+everything else goes through locally installed CLIs (claude, codex, agy, grok).
+"""
 
 import argparse
 import json

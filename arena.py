@@ -31,9 +31,9 @@ LAST_SEEN = time.time()
 SRV = None
 
 DEFAULT_CFG = {
-    "version": 4,
+    "version": 5,
     "workspace": "~/AI Arena",  # folder the tools run in when no working folder is set; all Arena sessions are kept here
-    "judge_timeout": 300,
+    "judge_timeout": 900,  # seconds the scoring model may take; it reads every answer and may look things up, which often takes 3-5 minutes
     "timeout": 600,
     "tools": {
         "claude": {
@@ -77,6 +77,7 @@ DEFAULT_CFG = {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
             "parser": "agy_stream", "color": "#7b61ff",
             "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
+            "continue_app": "Antigravity", "continue_antigravity": True,
             "continue_terminal": ["--conversation", "{session}"],
             "pty": True,  # agy -p can hang without a terminal, so it runs in a pseudo-terminal
             "install_script": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
@@ -217,6 +218,11 @@ def load_cfg():
                 sp["parser"] = DEFAULT_CFG["tools"]["codex"]["parser"]
         cfg["version"] = 4
         CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    if cfg.get("version", 1) < 5:  # v5: scoring took 75-285 s when it succeeded, so the old 300 s limit cut off about one review in six
+        if cfg.get("judge_timeout") == 300:  # only the old default is raised; any other value was chosen by the user and stays
+            cfg["judge_timeout"] = DEFAULT_CFG["judge_timeout"]
+        cfg["version"] = 5
+        CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     tools.setdefault("openai", copy.deepcopy(DEFAULT_CFG["tools"]["openai"]))
     for name, spec in tools.items():  # fill in new fields for older configs
         for k, v in DEFAULT_CFG["tools"].get(name, {}).items():
@@ -272,6 +278,7 @@ SLUG_RE = re.compile(r"\b([a-z][a-z0-9]*(?:[.-][a-z0-9]+)+)\b")
 NAME_RE = re.compile(r"^((?:Gemini|Claude|GPT|Orchestrator)\b[\w .()\-]*?)\s*$", re.I)
 EFFORT_SUFFIX = re.compile(r"-(?:minimal|low|medium|high|xhigh|max)$")
 MODELS_LOCK = threading.Lock()
+MODELS_PENDING = False
 
 try:
     MODEL_CACHE.update(json.loads(MODELS_FILE.read_text(encoding="utf-8")))
@@ -322,7 +329,25 @@ def parse_models(text):
     return list({x["id"]: x for x in models}.values())
 
 
+def model_sets_effort(model, spec):
+    """True when a model ID already names a reasoning level the tool knows, e.g. gemini-4-neon-high for a tool
+    whose efforts include "high". `agy models` lists every model once per level and no bare ID, so the level is
+    part of the model choice; sending a different --effort on top would make the run ambiguous and the stored
+    effort wrong. The level in the model ID wins and no effort flag is sent."""
+    m = EFFORT_SUFFIX.search(model or "")
+    return bool(m and spec.get("effort_args") and m.group(0)[1:] in (spec.get("efforts") or []))
+
+
+def start_refresh_models():
+    global MODELS_PENDING
+    if MODELS_LOCK.locked():
+        return
+    MODELS_PENDING = True
+    threading.Thread(target=refresh_models, daemon=True).start()
+
+
 def refresh_models():
+    global MODELS_PENDING
     if not MODELS_LOCK.acquire(blocking=False):
         return
     try:
@@ -334,11 +359,14 @@ def refresh_models():
             exe = mc and which(mc[0])
             if not exe:
                 continue
+            tmp = tempfile.mkdtemp(prefix="arena-models-")
             try:  # agy can hang without a terminal; use the pty setting, as for questions
-                rc, out, err = run_streaming(exe, mc[1:], spec, tempfile.mkdtemp(prefix="arena-models-"), 40, lambda t: None)
+                rc, out, err = run_streaming(exe, mc[1:], spec, tmp, 40, lambda t: None)
             except Exception as e:
                 print(f"[models] {name}: {e}", flush=True)
                 continue
+            finally:  # the folder only gives the CLI an empty place to run in; remove it every time
+                shutil.rmtree(tmp, ignore_errors=True)
             models = parse_models(out)
             if models:
                 print(f"[models] {name}: {len(models)} models: " + ", ".join(x["id"] for x in models), flush=True)
@@ -354,6 +382,7 @@ def refresh_models():
             except OSError:
                 pass
     finally:
+        MODELS_PENDING = False
         MODELS_LOCK.release()
 
 
@@ -449,7 +478,7 @@ def doctor(lang="en"):
             node = subprocess.run([which("node"), "--version"], capture_output=True, text=True, timeout=10).stdout.strip()
         except Exception:
             pass
-    threading.Thread(target=refresh_models, daemon=True).start()
+    start_refresh_models()
     return {"tools": [res[n] for n in cfg["tools"] if n in res], "npm": which("npm"), "node": node,
             "path": PATH_CACHE, "jobs": JOBS}
 
@@ -621,13 +650,414 @@ def set_setting(key, value):
 
 SYNC_LOCK = threading.Lock()
 CODEX_DESKTOP_LOCK = threading.Lock()
+ANTIGRAVITY_DESKTOP_LOCK = threading.Lock()
+ANTIGRAVITY_PROJECT_LOCK = threading.Lock()  # separate from the lock above: a sync holds that one while it looks up the project
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
+
+
+def _pbtxt_quote(text):
+    clean = re.sub(r"[\r\n\t]+", " ", (text or "").strip())
+    return clean.replace("\\", "\\\\").replace('"', '\\"')
+
+
+ANTIGRAVITY_ARENA_APP_DIR = "antigravity-arena"
+
+
+def _antigravity_dirs():
+    gemini = Path.home() / ".gemini"
+    return gemini / "antigravity-cli", gemini / "antigravity", gemini / "config" / "projects"
+
+
+def _antigravity_source_dir(sid=""):
+    """Where AI Arena's agy CLI stores `sid`. New synced sessions use ~/.gemini/antigravity-arena so
+    interactive `agy` terminals in ~/.gemini/antigravity-cli cannot race on SQLite schema init."""
+    gemini = Path.home() / ".gemini"
+    arena_root = gemini / ANTIGRAVITY_ARENA_APP_DIR
+    cli_root = gemini / "antigravity-cli"
+    if sid:
+        for root in (arena_root, cli_root):
+            conv = root / "conversations"
+            if (conv / f"{sid}.db").is_file() or (conv / f"{sid}.pb").is_file():
+                return root
+    return arena_root
+
+
+def _antigravity_db_valid(path):
+    """True when `path` is a readable Antigravity SQLite trajectory with populated metadata."""
+    if not Path(path).is_file():
+        return False
+    try:
+        conn = sqlite3.connect(_sqlite_ro_uri(path), uri=True, timeout=5)
+        try:
+            row = conn.execute("SELECT trajectory_type FROM trajectory_meta LIMIT 1").fetchone()
+            blob = conn.execute("SELECT length(data) FROM trajectory_metadata_blob WHERE id='main' LIMIT 1").fetchone()
+            return bool(row and row[0] and blob and blob[0])
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+def _antigravity_live_hubs():
+    """Return live Antigravity Desktop Hub endpoints [(http_port, csrf_token)] from ~/.gemini/antigravity/daemon."""
+    _, desk_root, _ = _antigravity_dirs()
+    daemon_dir = desk_root / "daemon"
+    if not daemon_dir.is_dir():
+        return []
+    hubs = []
+    for p in sorted(daemon_dir.glob("hub_*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            pid = int(data.get("pid") or 0)
+            port = int(data.get("httpPort") or 0)
+            tok = str(data.get("csrfToken") or "")
+            if not (pid > 0 and port > 0 and tok):
+                continue
+            os.kill(pid, 0)  # raises ProcessLookupError if stale
+            hubs.append((port, tok, str(data.get("lsVersion") or "")))
+        except (OSError, ValueError):
+            continue
+    hubs.sort(key=lambda h: tuple(int(x) for x in re.findall(r"\d+", h[2])) or (0,), reverse=True)
+    return [(port, tok) for port, tok, _ in hubs]
+
+
+def _antigravity_hub_sync_live(sid, title=""):
+    """Notify the running Antigravity Desktop ConversationService so the synced conversation appears
+    and refreshes immediately in the live sidebar. Preserves any user-edited title already set in Desktop."""
+    if not UUID_RE.fullmatch(sid or ""):
+        return False
+    import urllib.request
+    import urllib.error
+    for port, tok in _antigravity_live_hubs():
+        headers = {
+            "Content-Type": "application/json",
+            "Connect-Protocol-Version": "1",
+            "x-antigravity-csrf-token": tok,
+        }
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/product.v1.ConversationService/GetConversation",
+                data=json.dumps({"conversationId": sid}).encode("utf-8"),
+                headers=headers,
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                conv = json.loads(resp.read().decode("utf-8"))
+            existing_title = ((conv.get("annotations") or {}).get("title") or "").strip()
+            final_title = existing_title or (title or "").strip()
+            ann = {"title": final_title} if final_title else {}
+            req2 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/product.v1.ConversationService/UpdateConversation",
+                data=json.dumps({"conversationId": sid, "annotations": ann}).encode("utf-8"),
+                headers=headers,
+            )
+            with urllib.request.urlopen(req2, timeout=3):
+                return True
+        except (OSError, ValueError, urllib.error.URLError):
+            continue
+    return False
+
+
+def _project_folder_uris(data):
+    """folderUri strings of an Antigravity project file. The files belong to Antigravity, so every level is
+    type-checked: an unexpected shape yields nothing instead of raising."""
+    if not isinstance(data, dict):
+        return []
+    block = data.get("projectResources")
+    items = block.get("resources") if isinstance(block, dict) else None
+    out = []
+    for res in items if isinstance(items, list) else []:
+        if not isinstance(res, dict):
+            continue
+        git = res.get("gitFolder")
+        fu = res.get("folderUri") or (git.get("folderUri") if isinstance(git, dict) else "")
+        if isinstance(fu, str) and fu:
+            out.append(fu)
+    return out
+
+
+def _find_or_create_antigravity_project(folder):
+    resolved = Path(folder).expanduser().resolve()
+    target_uri = "file://" + urllib.parse.quote(str(resolved), safe="/")
+    _, _, proj_dir = _antigravity_dirs()
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    for p in sorted(proj_dir.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        pid = str(data.get("id") or "").strip()
+        if not pid or pid == "default-cli-project":
+            continue
+        for fu in _project_folder_uris(data):
+            if fu == target_uri or (fu.startswith("file://") and urllib.parse.unquote(fu[7:]).rstrip("/") == str(resolved).rstrip("/")):
+                return pid, str(data.get("name") or resolved.name or "AI Arena")
+    pid = str(uuid.uuid4())
+    name = resolved.name or "AI Arena"
+    payload = {
+        "id": pid,
+        "name": name,
+        "projectResources": {"resources": [{"folderUri": target_uri}]},
+        "permissionGrants": {"v2Migrated": True},
+        "settings": {},
+        "isWorkspaceOnly": False,
+    }
+    tmp = proj_dir / f".{pid}.json.tmp"
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, proj_dir / f"{pid}.json")
+    return pid, name
+
+
+def ensure_antigravity_project(folder):
+    """Find or create an Antigravity project in ~/.gemini/config/projects for `folder`.
+    Returns (project_id, project_name) or ("", ""). Never raises: it runs on the way to starting a tool,
+    where an exception would leave the round unfinished. The lock makes find-or-create one step, so two
+    rounds starting together in a new folder do not each create a project for it."""
+    if not folder:
+        return "", ""
+    try:
+        with ANTIGRAVITY_PROJECT_LOCK:
+            return _find_or_create_antigravity_project(folder)
+    except Exception as exc:
+        print(f"[Antigravity] project lookup failed for {folder}: {exc}", flush=True)
+        return "", ""
+
+
+def _write_antigravity_title(root_dir, sid, title):
+    """Give a conversation a title if it has none. An annotation file that already exists keeps all of its
+    other fields (such as last_user_view_time): the title is added in front, nothing is replaced."""
+    if not title:
+        return
+    ann_dir = root_dir / "annotations"
+    ann_path = ann_dir / f"{sid}.pbtxt"
+    try:
+        existing = ann_path.read_bytes() if ann_path.exists() else b""
+        if re.search(r'(^|\s)title\s*:', existing.decode("utf-8", "ignore")):
+            return
+        ann_dir.mkdir(parents=True, exist_ok=True)
+        tmp = ann_dir / f".{sid}.pbtxt.tmp"
+        line = f'title:"{_pbtxt_quote(title)}"'.encode("utf-8")
+        tmp.write_bytes(line + (b" " + existing.lstrip() if existing.strip() else b"\n"))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, ann_path)
+    except OSError:
+        pass
+
+
+def _copy_atomic(src, dst, mode=0o600):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.parent / f".{dst.name}.tmp.{os.getpid()}"
+    try:
+        shutil.copy2(src, tmp)
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, dst)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def _sqlite_ro_uri(path):
+    return "file:" + urllib.parse.quote(str(path)) + "?mode=ro"
+
+
+def _db_fingerprint(path):
+    """Row count, highest rowid and a content hash of every table in a conversation database, as one string
+    ("table:rows:max_rowid:hash|..."). "" for a missing file or one with no tables; None when the file cannot
+    be read as a database. Two copies with the same fingerprint hold the same conversation. The hash matters:
+    one new turn on each side gives equal row counts, and only the content tells the two copies apart."""
+    if not Path(path).is_file():
+        return ""
+    import hashlib
+    try:
+        conn = sqlite3.connect(_sqlite_ro_uri(path), uri=True, timeout=10)
+        conn.text_factory = bytes  # hash the stored bytes; never fail on text that is not valid UTF-8
+        try:
+            parts = []
+            for (raw,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                       "AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall():
+                name = raw.decode("utf-8", "replace")
+                ident = '"' + name.replace('"', '""') + '"'
+                try:
+                    top = conn.execute(f"SELECT coalesce(max(rowid), 0) FROM {ident}").fetchone()[0]
+                except sqlite3.OperationalError:  # a WITHOUT ROWID table
+                    top = ""
+                cnt, digest = 0, hashlib.sha256()
+                for row in conn.execute(f"SELECT * FROM {ident}"):
+                    cnt += 1
+                    digest.update(repr(row).encode("utf-8"))
+                parts.append(f"{name}:{cnt}:{top}:{digest.hexdigest()[:16]}")
+            return "|".join(parts)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+def _antigravity_db_action(sid, src_db, dst_db):
+    """What to do with the desktop copy of a conversation database: "copy", "same" or "conflict".
+    The copy only ever goes CLI -> desktop, so it must not run over turns that were added in the desktop app.
+    The desktop copy may be overwritten when it is missing or empty, or when it still looks exactly as Arena
+    left it at the last sync; if it changed since then, or cannot be read, that is a conflict.
+    A copy Arena has no record of (made before this check existed) is overwritten only while it is not
+    ahead of the CLI copy in any table; the first sync then records it and the exact check applies from there."""
+    dst_fp = _db_fingerprint(dst_db)
+    if dst_fp == "":
+        return "copy"
+    if dst_fp is None:
+        return "conflict"
+    src_fp = _db_fingerprint(src_db)
+    if dst_fp == src_fp:
+        return "same"
+    last = (get_setting("antigravity_sync_state", {}) or {}).get(sid)
+    if last is not None:
+        return "copy" if last == dst_fp else "conflict"
+    return "copy" if _fingerprint_not_ahead(dst_fp, src_fp) else "conflict"
+
+
+def _fingerprint_not_ahead(fp, other):
+    """True when no table in fingerprint `fp` has more rows, or a higher rowid, than in `other`."""
+    def parse(text):
+        out = {}
+        for part in (text or "").split("|"):
+            fields = part.rsplit(":", 3)  # table:rows:max_rowid:hash; the hash plays no part in "ahead"
+            if len(fields) == 4 and fields[0]:
+                out[fields[0]] = (int(fields[1] or 0), int(fields[2] or 0))
+        return out
+
+    try:
+        mine, theirs = parse(fp), parse(other)
+    except ValueError:
+        return False
+    return bool(theirs) and all(n in theirs and c <= theirs[n][0] and t <= theirs[n][1] for n, (c, t) in mine.items())
+
+
+def _remember_antigravity_sync(sid, fingerprint):
+    if not fingerprint:
+        return
+    state = get_setting("antigravity_sync_state", {}) or {}
+    state.pop(sid, None)  # re-insert so the newest entries are last
+    state[sid] = fingerprint
+    set_setting("antigravity_sync_state", dict(list(state.items())[-2000:]))
+
+
+def _sqlite_backup_into(src_db, dst_db, wait=20):
+    """Copy the source database into the destination through SQLite's backup API, writing to the destination
+    file in place. Antigravity Desktop keeps its conversation databases open in WAL mode; swapping the file
+    underneath it (os.replace) would leave its -wal/-shm files paired with a different database, which
+    corrupts the conversation. Going through SQLite takes the proper locks, commits the copy as one
+    transaction that other connections see, and lets SQLite deal with any leftover -wal file.
+    Raises sqlite3.Error if the destination stays locked for longer than `wait` seconds."""
+    deadline = time.time() + wait
+
+    def progress(status, remaining, total):  # called after every step, including the ones that found it locked
+        if status in (5, 6) and time.time() > deadline:  # SQLITE_BUSY, SQLITE_LOCKED
+            raise sqlite3.OperationalError("the desktop copy is locked by another program")
+
+    src = sqlite3.connect(_sqlite_ro_uri(src_db), uri=True, timeout=10)
+    try:
+        dst = sqlite3.connect(str(dst_db), timeout=max(0.1, min(5, wait)))
+        try:
+            src.backup(dst, progress=progress)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    os.chmod(dst_db, 0o600)
+
+
+def sync_antigravity_session(sid, folder="", title="", open_app=False, lang="en"):
+    """Copy a CLI Antigravity conversation (db/pb/brain/annotation) into ~/.gemini/antigravity
+    so Antigravity Desktop can display and continue the full Q&A.
+    Returns (ok, info, project_id, conflict). conflict is True when the desktop copy has changes of its own
+    and was left untouched; with open_app the app is still opened in that case."""
+    if not UUID_RE.fullmatch(sid or ""):
+        return False, "invalid session id", "", False
+    _, desk_root, _ = _antigravity_dirs()
+    cli_root = _antigravity_source_dir(sid)
+    src_db = cli_root / "conversations" / f"{sid}.db"
+    src_pb = cli_root / "conversations" / f"{sid}.pb"
+    dst_conv = desk_root / "conversations"
+    dst_db = dst_conv / f"{sid}.db"
+    dst_pb = dst_conv / f"{sid}.pb"
+    if not src_db.is_file() and not src_pb.is_file() and not dst_db.is_file():
+        return False, "conversation store not found", "", False
+    pid, pname = ensure_antigravity_project(folder)
+    conflict = False
+    try:
+        dst_conv.mkdir(parents=True, exist_ok=True)
+        if src_db.is_file() and _antigravity_db_valid(src_db):
+            action = _antigravity_db_action(sid, src_db, dst_db)
+            conflict = action == "conflict"
+            if action == "copy":
+                _sqlite_backup_into(src_db, dst_db)
+            if action in ("copy", "same"):  # remember what the desktop copy looked like when Arena last matched it
+                _remember_antigravity_sync(sid, _db_fingerprint(dst_db))
+        if conflict:  # the desktop side has turns of its own: leave every file of that conversation alone
+            print(f"[Antigravity] {sid}: desktop copy changed since the last sync; not overwritten", flush=True)
+            if not open_app:
+                return False, M(lang, "antigravity_desktop_conflict"), pname, True
+        if src_pb.is_file() and not conflict:
+            _copy_atomic(src_pb, dst_pb, mode=0o600)
+        src_brain = cli_root / "brain" / sid
+        if src_brain.is_dir() and not conflict:
+            dst_brain = desk_root / "brain" / sid
+            for root, _, files in os.walk(src_brain):
+                rel = Path(root).relative_to(src_brain)
+                for fn in files:
+                    sp = Path(root) / fn
+                    if not sp.is_file() or sp.is_symlink():
+                        continue
+                    dp = dst_brain / rel / fn
+                    try:
+                        if dp.is_file() and dp.stat().st_size == sp.stat().st_size and dp.stat().st_mtime >= sp.stat().st_mtime:
+                            continue
+                        _copy_atomic(sp, dp, mode=None)
+                    except OSError:
+                        pass
+        if title:
+            _write_antigravity_title(cli_root, sid, title)
+        live_ok = _antigravity_hub_sync_live(sid, title)
+        if not live_ok:
+            time.sleep(0.3)
+            live_ok = _antigravity_hub_sync_live(sid, title)
+        if title and not live_ok:
+            _write_antigravity_title(desk_root, sid, title)
+    except (OSError, sqlite3.Error) as exc:
+        return False, str(exc), pname, False
+    if open_app and sys.platform == "darwin":
+        url = f"antigravity://open?project={urllib.parse.quote(pid)}" if pid else "antigravity://open"
+        try:
+            r = subprocess.run(["/usr/bin/open", "-b", "com.google.antigravity", url], capture_output=True, text=True, timeout=15)
+            if r.returncode:
+                r2 = subprocess.run(["/usr/bin/open", "-a", "Antigravity"], capture_output=True, text=True, timeout=15)
+                if r2.returncode:
+                    return False, (r.stderr or r2.stderr or r.stdout or r2.stdout).strip()[-300:], pname, conflict
+        except (OSError, subprocess.TimeoutExpired) as exc:  # the files are already in place; only opening the app failed
+            return False, str(exc), pname, conflict
+    return True, pname or Path(folder).name or "AI Arena", pid, conflict
+
+
+def _root_prompt_title(rid):
+    run = q("SELECT id, thread, prompt FROM runs WHERE id=?", (rid,), one=True)
+    if not run:
+        return ""
+    root_id = run.get("thread") or run["id"]
+    root = q("SELECT prompt FROM runs WHERE id=?", (root_id,), one=True) or run
+    first = re.sub(r"\s+", " ", (root.get("prompt") or "").strip().split("\n")[0])
+    return first if len(first) <= 40 else first[:40].rstrip() + "…"
 
 
 def desktop_sync(rid, lang="en", tool=None):
-    """Apply each desktop preference once per completed native session."""
+    """Apply each desktop preference for completed native sessions."""
     claude_sync = bool(get_setting("desktop_sync", False))
     codex_open = sys.platform == "darwin" and bool(get_setting("codex_desktop_open", False))
-    if not (claude_sync or codex_open):
+    ag_sync = bool(get_setting("antigravity_desktop_sync", False))
+    if not (claude_sync or codex_open or ag_sync):
         return
     tools = load_cfg()["tools"]
     for o in q("SELECT tool, status, session, length(trim(coalesce(output, ''))) > 0 AS has_output "
@@ -636,11 +1066,23 @@ def desktop_sync(rid, lang="en", tool=None):
             continue
         spec = tools.get(o["tool"]) or {}
         is_codex = o["tool"] == "codex" and bool(spec.get("continue_url"))
+        is_ag = o["tool"] == "antigravity" and bool(spec.get("continue_antigravity"))
         if o["status"] != "ok" or not o["session"]:
             continue
+        if is_ag:
+            if not (ag_sync and o["has_output"] and UUID_RE.fullmatch(o["session"])):
+                continue
+            _, folder = session_for(rid, o["tool"])
+            title = _root_prompt_title(rid)
+            with ANTIGRAVITY_DESKTOP_LOCK:
+                ok, info, _, _ = sync_antigravity_session(o["session"], folder=folder, title=title, open_app=False, lang=lang)
+            note = M(lang, "antigravity_desktop_synced" if ok else "antigravity_desktop_sync_failed",
+                     app=spec.get("continue_app") or "Antigravity", folder=info, msg=info)
+            q("UPDATE outputs SET log=COALESCE(log,'')||? WHERE run_id=? AND tool=?", (note, rid, o["tool"]))
+            print(note.strip(), flush=True)
+            continue
         if is_codex:
-            if not (codex_open and o["has_output"]
-                    and re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", o["session"])):
+            if not (codex_open and o["has_output"] and UUID_RE.fullmatch(o["session"])):
                 continue
             lock, setting = CODEX_DESKTOP_LOCK, "codex_desktop_opened"
         elif claude_sync and spec.get("continue_desktop"):
@@ -730,6 +1172,10 @@ def continue_session(rid, tool, action, lang="en", background=False):
     exe = spec.get("cmd", [tool])[0]
     sub = lambda args: [a.replace("{session}", sid) for a in args]
     term = [exe] + sub(spec.get("continue_terminal") or [])
+    if tool == "antigravity" and spec.get("continue_antigravity"):
+        src_root = _antigravity_source_dir(sid)
+        if src_root.name == ANTIGRAVITY_ARENA_APP_DIR and not any(a.startswith("--app_data_dir") for a in term):
+            term = [exe, f"--app_data_dir={ANTIGRAVITY_ARENA_APP_DIR}"] + term[1:]
     command = f"cd {shlex.quote(folder)} && " + " ".join(shlex.quote(a) for a in term)
     if action == "command" or not spec.get("continue_terminal") and action == "terminal":
         return True, "", command
@@ -751,6 +1197,14 @@ def continue_session(rid, tool, action, lang="en", background=False):
         if r.returncode:
             return False, M(lang, "continue_fail", app=app, out=(r.stderr or r.stdout).strip()[-300:]), command
         return True, M(lang, "continue_url", app=app), command
+    if spec.get("continue_antigravity"):
+        title = _root_prompt_title(rid)
+        with ANTIGRAVITY_DESKTOP_LOCK:
+            ok, info, _, conflict = sync_antigravity_session(sid, folder=folder, title=title, open_app=not background, lang=lang)
+        if not ok:
+            return False, M(lang, "continue_fail", app=app, out=info), command
+        # the app opened, but its copy has turns of its own: say that Arena's latest round was not copied over it
+        return True, M(lang, "continue_url", app=app) + (" " + M(lang, "antigravity_desktop_conflict") if conflict else ""), command
     if spec.get("continue_desktop"):
         path = which(exe)
         if not path:
@@ -1442,6 +1896,19 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         note += M(lang, "title_note", title=title)
     if attach_dir and cwd and spec.get("add_dir_args"):  # the tool runs in the workspace, so also allow reading the attachments folder
         extra += [a.replace("{dir}", attach_dir) for a in spec["add_dir_args"]]
+    if name == "antigravity" and spec.get("continue_antigravity") and cwd:
+        ag_sync_on = bool(get_setting("antigravity_desktop_sync", False))
+        src_root = _antigravity_source_dir(session) if session else (Path.home() / ".gemini" / ANTIGRAVITY_ARENA_APP_DIR)
+        use_arena_dir = src_root.name == ANTIGRAVITY_ARENA_APP_DIR if session else ag_sync_on
+        if use_arena_dir and not any(a.startswith("--app_data_dir") for a in (*base, *extra)):
+            extra += [f"--app_data_dir={ANTIGRAVITY_ARENA_APP_DIR}"]
+        try:  # optional extra: a failed lookup must not keep the tool from running
+            ag_pid = ensure_antigravity_project(cwd)[0] if ag_sync_on else ""
+        except Exception as exc:
+            ag_pid = ""
+            print(f"[Antigravity] project lookup skipped: {exc}", flush=True)
+        if ag_pid and "--project" not in (*base, *extra):
+            extra += ["--project", ag_pid]
     if model and spec.get("model_flag"):
         extra += [spec["model_flag"], model]
     if effort and spec.get("effort_args"):
@@ -1504,6 +1971,8 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     try:
         if not exe:
             raise FileNotFoundError(cmd[0])
+        if cwd and not os.path.isdir(cwd):  # Popen reports a missing folder as FileNotFoundError too, which would read as "not installed"
+            raise NotADirectoryError(M(lang, "no_dir", d=cwd))
         if uses_openai:
             api_input = tempfile.TemporaryFile()
             api_input.write(prompt.encode("utf-8"))
@@ -1607,11 +2076,16 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       (run.id, name, status, secs, "".join(out), "".join(log), shown, model, actual[0], effort, sess[0]))
     run.emit({"tool": name, "type": "done", "status": status, "seconds": secs})
-    if status == "ok" and sess[0] and (spec.get("continue_desktop") or (name == "codex" and spec.get("continue_url"))):
+    if status == "ok" and sess[0] and (spec.get("continue_desktop") or spec.get("continue_antigravity") or (name == "codex" and spec.get("continue_url"))):
         threading.Thread(target=desktop_sync, args=(run.id, lang, name), daemon=True).start()
+    _finish_tool(run, name)
+
+
+def _finish_tool(run, name):
+    """Mark one tool of a round as finished; when it was the last one, end the round (and start scoring if asked)."""
     with run.cond:
         run.pending.discard(name)
-        if not run.pending:
+        if not run.pending and not run.finished_at:
             run.finished_at = time.time()
             run.events.append({"type": "end"})
             if run.judge and not run.cancelled:  # automatic scoring
@@ -1619,9 +2093,33 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         run.cond.notify_all()
 
 
+def run_tool(run, name, *args):
+    """Thread entry for one tool of a round. exec_tool does the work; if it raises anywhere before its own
+    bookkeeping, the tool is recorded as start_failed here so the round still ends. Without this the page
+    would show the tool as running forever, automatic scoring would never start, and --idle-exit would
+    never see the server as idle."""
+    try:
+        exec_tool(run, name, *args)
+    except Exception as exc:
+        with run.cond:
+            unfinished = name in run.pending
+        if unfinished:
+            note = f"{type(exc).__name__}: {exc}\n"
+            print(f"[{name}] failed before it could start: {note.strip()}", flush=True)
+            try:  # OR IGNORE: keep the real result if exec_tool had already stored one
+                q("INSERT OR IGNORE INTO outputs(run_id, tool, status, seconds, output, log, cmd) VALUES(?,?,?,?,?,?,?)",
+                  (run.id, name, "start_failed", 0, "", note, ""))
+            except sqlite3.Error:
+                pass
+            run.emit({"tool": name, "type": "log", "data": note})
+            run.emit({"tool": name, "type": "done", "status": "start_failed", "seconds": 0})
+        _finish_tool(run, name)
+
+
 # ---------------- Scoring (anonymous review by Grok or another third-party model) ----------------
 JUDGING = set()
 JUDGE_KEYS = ("accuracy", "completeness", "clarity", "usefulness")
+JUDGE_GRACE = 180  # extra seconds for a verdict that is still being written when judge_timeout is reached
 
 
 def build_judge_prompt(question, earlier, answers, lang="en"):
@@ -1760,13 +2258,17 @@ def start_judge(rid, model="", lang="en"):
                 q("UPDATE judgments SET raw=?, seconds=? WHERE run_id=?", (text[-20000:], round(time.time() - t0, 1), rid))
 
         try:
-            sec = cfg.get("judge_timeout", 300)
-            rc, out, err = run_streaming(exe, cmd[1:], spec, tempfile.mkdtemp(prefix="arena-judge-"), sec, progress)
+            sec = cfg.get("judge_timeout", DEFAULT_CFG["judge_timeout"])
+            tmp = tempfile.mkdtemp(prefix="arena-judge-")
+            try:  # a verdict that is being written when the limit is reached gets JUDGE_GRACE more seconds to finish
+                rc, out, err = run_streaming(exe, cmd[1:], spec, tmp, sec, progress, grace=JUDGE_GRACE)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
             raw = out + ("\n[stderr]\n" + err if err.strip() else "")
             o = parse_judge(out) if rc == 0 else None
             if rc is None:
                 tail = ANSI_RE.sub("", raw).strip()[-300:] or M(lang, "judge_no_output")
-                reason = M(lang, "judge_timeout_tail", label=label, sec=sec, tail=tail)
+                reason = M(lang, "judge_timeout_tail", label=label, sec=round(time.time() - t0), tail=tail)
             elif not o:
                 reason = M(lang, "judge_exit", label=label, code=rc) if rc else M(lang, "judge_parse", label=label)
             else:
@@ -1796,11 +2298,15 @@ def start_judge(rid, model="", lang="en"):
     return ""
 
 
-def run_streaming(exe, args, spec, cwd, timeout, on_text):
-    """Run a CLI and call on_text(accumulated output) as it reads. Return (exit code or None on timeout, output, stderr)."""
+def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30):
+    """Run a CLI and call on_text(accumulated output) as it reads. Return (exit code or None on timeout, output, stderr).
+    With `grace`, a command that is still writing when `timeout` is reached is not cut off mid-answer: it may
+    go on for up to `grace` more seconds, for as long as new output keeps arriving at least every `quiet` seconds.
+    A command that has printed nothing, or has gone silent, is stopped at `timeout` as before."""
     env = child_env()
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     buf, err, out_fd = [], [], None
+    last_out = [0.0]  # when output last arrived
     if use_pty:
         import pty, termios, fcntl, struct
         out_fd, slave = pty.openpty()
@@ -1832,6 +2338,7 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
                 t = ptx.feed(t) + ("" if b else ptx.flush())
             if t:
                 buf.append(t)
+                last_out[0] = time.time()
                 on_text("".join(buf))
             if not b:
                 break
@@ -1847,8 +2354,15 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text):
     try:
         rc = p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        kill(p)
-        p.wait()
+        end = time.time() + grace
+        while rc is None and time.time() < end and time.time() - last_out[0] < quiet:  # mid-answer: let it finish
+            try:
+                rc = p.wait(timeout=min(0.5, quiet, max(0.01, end - time.time())))
+            except subprocess.TimeoutExpired:
+                pass
+        if rc is None:
+            kill(p)
+            p.wait()
     for th in ths:
         th.join(5)
     if use_pty:
@@ -1903,14 +2417,19 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     models = {t: str((models or {}).get(t) or "").strip() for t in tools}
     efforts = {t: e if re.fullmatch(r"[a-z]{1,12}", e := str((efforts or {}).get(t) or "").strip()) else ""
                for t in tools}
+    for t in tools:  # gemini-4-neon-high already names its level: a separate --effort low would contradict it
+        if model_sets_effort(models[t], cfg["tools"][t]):
+            efforts[t] = ""
+    run_cwd = workdir if parent else (cwd or workspace_dir(cfg))  # one folder per thread, so every tool can resume its session there
+    if not os.path.isdir(run_cwd):  # e.g. a follow-up whose folder was deleted or renamed: say so once, before anything is started
+        raise ValueError(M(lang, "no_dir", d=run_cwd))
     metas = claim_attachments(attachments, rid, lang) if attachments else []
     attach = attachment_block(metas, lang)
     api_attach = attachment_block(metas, lang, with_paths=False) if any(
         cfg["tools"][t].get("transport") == "openai_responses" for t in tools
     ) else ""
     attach_dir = str(ATTACH_DIR / rid) if metas else ""
-    run_cwd = workdir if parent else (cwd or workspace_dir(cfg))  # one folder per thread, so every tool can resume its session there
-    peers = {t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
+    peers ={t: [(lab, out) for tt, lab, out in prev if tt != t] for t in tools}
     shared = any(peers.values())
     q("INSERT INTO runs(id, created_at, prompt, cwd, tag, tools, winner, models, efforts, thread, parent, chat, attachments, peers, "
       "workdir) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1922,7 +2441,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
     for t in tools:
         spec = cfg["tools"][t]
         uses_openai = spec.get("transport") == "openai_responses"
-        threading.Thread(target=exec_tool, args=(run, t, spec, prompt, run_cwd, cfg.get("timeout", 600),
+        threading.Thread(target=run_tool, args=(run, t, spec, prompt, run_cwd, cfg.get("timeout", 600),
                                                  models[t], efforts[t], sessions.get(t, ""),
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
                                                  peers.get(t), api_attach if uses_openai else attach,
@@ -2031,7 +2550,7 @@ class H(BaseHTTPRequestHandler):
             self._json({"tools": {k: {"color": v.get("color", "#888"), "label": v.get("label") or k.capitalize(),
                                       "models": MODEL_CACHE.get(k) or v.get("models", []),
                                       "dynamic": bool(v.get("models_cmd")),
-                                      "continue_app": (v.get("continue_app") or "") if (v.get("continue_url") or v.get("continue_desktop")) else "",
+                                      "continue_app": (v.get("continue_app") or "") if (v.get("continue_url") or v.get("continue_desktop") or v.get("continue_antigravity")) else "",
                                       "continue_terminal": bool(v.get("continue_terminal")),
                                       "continue_via_url": bool(v.get("continue_url")),
                                       "flag": bool(v.get("model_flag")), "default_label": tool_text(self.lang, k, v, "default_label") or loc(self.lang, "ui", "default"),
@@ -2040,6 +2559,7 @@ class H(BaseHTTPRequestHandler):
                                       "ready": v.get("transport") != "openai_responses" or openai_ready()}
                                   for k, v in cfg["tools"].items()},
                         "order": enabled_tools(cfg), "judge": judge_tool(cfg), "tags": tags,
+                        "models_refreshing": bool(MODELS_PENDING or MODELS_LOCK.locked()),
                         "desktop_sync": {"available": any(v.get("continue_desktop") for v in cfg["tools"].values()),
                                          "on": bool(get_setting("desktop_sync", False)),
                                          "folder": Path(workspace_dir(cfg)).name},
@@ -2047,6 +2567,11 @@ class H(BaseHTTPRequestHandler):
                             "available": sys.platform == "darwin" and bool(
                                 cfg["tools"].get("codex", {}).get("continue_url")),
                             "on": bool(get_setting("codex_desktop_open", False)),
+                        },
+                        "antigravity_desktop_sync": {
+                            "available": bool(cfg["tools"].get("antigravity", {}).get("continue_antigravity")),
+                            "on": bool(get_setting("antigravity_desktop_sync", False)),
+                            "folder": Path(workspace_dir(cfg)).name,
                         }})
         elif p.startswith("/api/file/"):  # open an attachment's original file for a round
             parts = p.split("/")
@@ -2078,7 +2603,10 @@ class H(BaseHTTPRequestHandler):
             self._json(d) if d else self._json({"error": "not found"}, 404)
         elif p == "/api/history":
             kw, tag = qs.get("q", ""), qs.get("tag", "")
-            limit = max(1, min(int(qs.get("limit") or 200), 500))
+            try:
+                limit = max(1, min(int(qs.get("limit") or 200), 500))
+            except ValueError:
+                limit = 200
             rows = q("""SELECT runs.id, created_at, prompt, tag, winner, tools, models, efforts, cwd, chat, attachments,
                  (SELECT group_concat(tool||' '||score, '，') FROM ratings r WHERE r.run_id=runs.id AND score>0) scores,
                  (SELECT COUNT(*) FROM runs c WHERE c.thread=runs.id) nturns,
@@ -2123,15 +2651,21 @@ class H(BaseHTTPRequestHandler):
             b = self._body()
         except ValueError:
             return self._json({"error": "bad json"}, 400)
+        if not isinstance(b, dict):  # every endpoint below reads fields with b.get
+            return self._json({"error": "bad json"}, 400)
         if p == "/api/settings":
-            keys = ("desktop_sync", "codex_desktop_open")
+            keys = ("desktop_sync", "codex_desktop_open", "antigravity_desktop_sync")
             for key in keys:
                 if key in b:
                     set_setting(key, bool(b[key]))
             return self._json({key: bool(get_setting(key, False)) for key in keys})
         if p == "/api/continue":
-            ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
-                                                    str(b.get("action") or "app"), self.lang)
+            try:
+                ok, message, command = continue_session(str(b.get("run") or ""), str(b.get("tool") or ""),
+                                                        str(b.get("action") or "app"), self.lang)
+            except (OSError, subprocess.TimeoutExpired) as exc:  # e.g. `open` timed out: answer with the reason, not a dropped connection
+                ok, command = False, ""
+                message = M(self.lang, "continue_fail", app=str(b.get("tool") or ""), out=str(exc))
             return self._json({"ok": ok, "message": message, "command": command, "error": "" if ok else message},
                               200 if ok else 400)
         if p == "/api/prompts":
@@ -2206,11 +2740,20 @@ class H(BaseHTTPRequestHandler):
             self._json({"ok": True})
             threading.Thread(target=shutdown, daemon=True).start()
         elif p == "/api/rate":
-            q("INSERT OR REPLACE INTO ratings VALUES(?,?,?,?)",
-              (b["run_id"], b["tool"], int(b.get("score") or 0), b.get("note") or ""))
+            rid, tool = str(b.get("run_id") or ""), str(b.get("tool") or "")
+            try:
+                score = int(b.get("score") or 0)
+            except (TypeError, ValueError):
+                score = None
+            if not rid or not tool or score is None:
+                return self._json({"error": "run_id, tool and a whole-number score are required"}, 400)
+            q("INSERT OR REPLACE INTO ratings VALUES(?,?,?,?)", (rid, tool, score, str(b.get("note") or "")))
             self._json({"ok": True})
         elif p == "/api/winner":
-            q("UPDATE runs SET winner=? WHERE id=?", (b.get("winner") or "", b["run_id"]))
+            rid = str(b.get("run_id") or "")
+            if not rid:
+                return self._json({"error": "run_id is required"}, 400)
+            q("UPDATE runs SET winner=? WHERE id=?", (str(b.get("winner") or ""), rid))
             self._json({"ok": True})
         elif p.startswith("/api/delete/"):  # deleting the first question deletes the whole conversation
             rid = p.rsplit("/", 1)[1]
@@ -2682,6 +3225,10 @@ table.grid{width:100%;border-collapse:collapse;background:var(--surface);border:
     <label class="chatopt"><input type="checkbox" role="switch" id="codexDesktopOpen"><span data-i18n="e.codexDesktopOpen">Open new conversations in Codex App</span></label>
     <span class="note-s" data-i18n="e.codexDesktopOpenNote" style="margin:0;max-width:760px"></span>
   </div>
+  <div class="bar" id="antigravityDesktopPref" hidden>
+    <label class="chatopt"><input type="checkbox" role="switch" id="antigravityDesktopSync"><span data-i18n="e.antigravityDesktopSync">Sync conversations to Antigravity App</span></label>
+    <span class="note-s" id="antigravityDesktopSyncNote" style="margin:0;max-width:760px"></span>
+  </div>
   <table class="grid env" id="etable"></table>
   <div id="ejobs"></div>
   <details class="note-s"><summary data-i18n="env.path">Searched PATH</summary><pre id="epath" class="joblog"></pre></details>
@@ -2797,18 +3344,20 @@ const effName=e=>{const l=TT('eff.'+e);return l&&l!==e?l:''};  // localized effo
 const effLabel=e=>e?`${e} ${effName(e)}`.trim():'';
 const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
+/* A model ID that already names its level (gemini-4-neon-high) fixes the effort: the picker shows that level and is disabled, and the server sends no separate effort flag. */
+const modelEffort=t=>{const m=/-(minimal|low|medium|high|xhigh|max)$/.exec(SEL[t]?.model||'');return m&&(CFG.tools[t].efforts||[]).includes(m[1])?m[1]:''};
 function renderLanes(){
   const tools=visibleTools();
   $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
-  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t];
+  $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t],own=modelEffort(t);
     const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
       <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
       <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
-      ${(v.efforts||[]).length?`<select class="eff${sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false?'disabled':''}>
-        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===sel.effort?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
+      ${(v.efforts||[]).length?`<select class="eff${own||sel.effort?' set':''}" aria-label="${esc(T('lane.effAria',tname(t)))}" title="${esc(T('lane.effTitle'))}" ${v.ready===false||own?'disabled':''}>
+        <option value="">${esc(T('lane.effDefault'))}</option>${v.efforts.map(e=>`<option value="${esc(e)}"${e===(own||sel.effort)?' selected':''} title="${esc(effName(e)||e)}">Effort ${esc(e)}</option>`).join('')}</select>`:''}</div>`}).join('');
 }
 $('#lanes').addEventListener('click',e=>{const b=e.target.closest('.lsw');if(!b)return;const t=b.closest('.lane').dataset.t;
   if(CFG.tools[t].ready===false){toast(T('lane.apiSetup'));return}
@@ -3088,12 +3637,17 @@ function ppInit(){
   if(ls.get('arenaPP',false))ppOpen(true);
 }
 
-/* ---------- Dynamic model lists (agy models is read in the background and added to the picker when ready) ---------- */
-function modelsLater(n){
-  if(n>=6||!CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length))return;
-  setTimeout(async()=>{try{const c=await api('/api/config');let got=false;
-    for(const t of CFG.order)if(CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length&&(c.tools[t]?.models||[]).length){CFG.tools[t].models=c.tools[t].models;got=true}
-    if(got)renderLanes()}catch(e){}modelsLater(n+1)},10000);
+/* ---------- Dynamic model lists (agy models is read in the background and synced to the picker when ready) ---------- */
+let modelsT=0;
+function modelsLater(n=0){
+  clearTimeout(modelsT);
+  const hasDyn=CFG.order.some(t=>CFG.tools[t].dynamic);
+  const needEmpty=CFG.order.some(t=>CFG.tools[t].dynamic&&!(CFG.tools[t].models||[]).length);
+  if(!hasDyn||n>=20||(!CFG.models_refreshing&&!needEmpty))return;
+  modelsT=setTimeout(async()=>{try{const c=await api('/api/config');CFG.models_refreshing=!!c.models_refreshing;let got=false;
+    for(const t of CFG.order){if(!CFG.tools[t].dynamic)continue;const next=c.tools[t]?.models||[];
+      if(next.length&&JSON.stringify(CFG.tools[t].models||[])!==JSON.stringify(next)){CFG.tools[t].models=next;got=true}}
+    if(got)renderLanes()}catch(e){}modelsLater(n+1)},n<4?2500:5000);
 }
 
 /* ---------- Attachments ---------- */
@@ -3281,7 +3835,7 @@ async function loadHistory(){
 }
 $('#hlist').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const id=b.dataset.id;
   if(b.dataset.a==='open')openRun(id).catch(toast);
-  else if(confirm(T('h.confirm'))){await post('/api/delete/'+encodeURIComponent(id)).catch(toast);const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
+  else if(confirm(T('h.confirm'))){try{await post('/api/delete/'+encodeURIComponent(id))}catch(err){toast(err);return}const r=ROUNDS.get(id);if(r){r.el.remove();ROUNDS.delete(id)}loadHistory()}};
 let hqT;$('#hq').oninput=()=>{clearTimeout(hqT);hqT=setTimeout(loadHistory,250)};$('#htag').onchange=loadHistory;
 
 /* ---------- Stats ---------- */
@@ -3311,6 +3865,7 @@ let jobT=0;
 async function loadEnv(){
   $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
+  CFG.models_refreshing=true;modelsLater(0);
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
@@ -3370,6 +3925,22 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
       finally{sw.disabled=false}
     };
   }
+  if(CFG.antigravity_desktop_sync?.available){
+    const sw=$('#antigravityDesktopSync');
+    $('#antigravityDesktopPref').hidden=false;
+    sw.checked=!!CFG.antigravity_desktop_sync.on;
+    $('#antigravityDesktopSyncNote').textContent=T('e.antigravityDesktopSyncNote',CFG.antigravity_desktop_sync.folder);
+    sw.onchange=async()=>{
+      const selected=sw.checked;
+      sw.disabled=true;
+      try{
+        const d=await post('/api/settings',{antigravity_desktop_sync:selected});
+        CFG.antigravity_desktop_sync.on=!!d.antigravity_desktop_sync;
+        sw.checked=CFG.antigravity_desktop_sync.on;
+      }catch(e){sw.checked=!selected;toast(e)}
+      finally{sw.disabled=false}
+    };
+  }
   if(SEL.openai){
     const setting=$('#showOpenai');
     $('#openaiPreference').hidden=false;
@@ -3415,7 +3986,7 @@ def shutdown():
 def idle_watchdog():
     while True:
         time.sleep(30)
-        busy = any(not r.finished_at for r in RUNS.values())
+        busy = any(not r.finished_at for r in list(RUNS.values()))  # a copy: request threads add and remove rounds meanwhile
         if not busy and time.time() - LAST_SEEN > IDLE_SECS:
             print(f"Idle for {IDLE_SECS}s, exiting")
             shutdown()
@@ -3431,7 +4002,7 @@ def main():
         c.close()
     load_cfg()
     cleanup_staging()
-    threading.Thread(target=refresh_models, daemon=True).start()
+    start_refresh_models()
     srv = SRV = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     srv.daemon_threads = True
     if IDLE_EXIT:

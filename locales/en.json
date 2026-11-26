@@ -241,7 +241,9 @@
   "e.desktopSync": "Add new conversations to Claude Desktop",
   "e.codexDesktopOpen": "Open new conversations in Codex App",
   "e.codexDesktopOpenNote": "Open the original conversation in the background after its first successful answer.",
-  "e.desktopSyncNote": "After the first round of each new conversation, Claude's session is added to the \"{0}\" group in the Claude Desktop sidebar, once per session. Claude Desktop opens the session when it is added. Needs Claude Code v2.1.285 or later and a Claude subscription sign-in."
+  "e.desktopSyncNote": "After the first round of each new conversation, Claude's session is added to the \"{0}\" group in the Claude Desktop sidebar, once per session. Claude Desktop opens the session when it is added. Needs Claude Code v2.1.285 or later and a Claude subscription sign-in.",
+  "e.antigravityDesktopSync": "Sync conversations to Antigravity App",
+  "e.antigravityDesktopSyncNote": "After each successful round, automatically sync Antigravity's full Q&A into the Antigravity desktop app, under the project for the folder that round ran in (\"{0}\" when no working folder is set), so you can view and continue it there. A conversation you continue in the desktop app is not overwritten afterwards."
  },
  "msg": {
   "detect_timeout": "(check timed out)",
@@ -306,6 +308,9 @@
   "codex_desktop_opened": "[{app}] Requested the original conversation in the desktop app.\n",
   "codex_desktop_open_failed": "[{app}] Could not open the conversation: {msg}\n",
   "desktop_sync_fail": "[{app}] Could not add it: {msg}\n",
+  "antigravity_desktop_synced": "[{app}] Synced to the \"{folder}\" project in {app}\n",
+  "antigravity_desktop_sync_failed": "[{app}] Failed to sync to desktop app: {msg}\n",
+  "antigravity_desktop_conflict": "The desktop copy of this conversation has changed since the last sync, so it was not overwritten.",
   "title_note": "[title] {title}\n"
  },
  "tools": {
@@ -673,6 +678,21 @@
    "Prompting",
    "Write a system prompt",
    "Write a system prompt for an AI assistant used for {{purpose}}: its role, target users, answer style, rules it must follow and things it must not do, plus two example conversations."
+  ],
+  "reason-monty4": [
+   "Reasoning",
+   "Probability trap: four doors",
+   "There are 4 doors: a car behind 1 of them and goats behind the other 3. You pick door 1.\nCase A: The host does not know where the car is. He opens 1 of the 3 doors you didn't pick at random, and it happens to show a goat.\nCase B: The host knows where the car is and always opens a goat door you didn't pick (choosing at random when several qualify).\nIn each case, should you stay with door 1 or switch to one of the two remaining closed doors? Work out the probability of winning the car for each choice, and explain why the two cases differ."
+  ],
+  "reason-simpson": [
+   "Reasoning",
+   "Data trap: which program is better",
+   "We tested two customer success programs and checked whether customers renewed after a year:\n- Large customers: program A 300 customers, 270 renewed; program B 100 customers, 95 renewed\n- Small customers: program A 100 customers, 20 renewed; program B 300 customers, 90 renewed\nEach customer's program was chosen by their own sales rep.\nLooking at the totals, the boss says \"A clearly has the higher renewal rate, so roll out A everywhere.\" Do you agree? Give your judgment and reasoning, and say what data or experiment you'd need before deciding."
+  ],
+  "reason-fermi": [
+   "Reasoning",
+   "Open estimate: robotaxi fleet size",
+   "If every taxi in Tokyo were replaced by a self-driving vehicle, how many vehicles would be needed to keep today's level of service (the same waiting times)?\nBreak the problem down, state each assumption and where its value comes from, give a range, and identify which assumption the result is most sensitive to and how the result changes if it moves."
   ]
  },
  "launcher": {
