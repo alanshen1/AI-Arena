@@ -13,6 +13,7 @@ Data is stored in arena.db (SQLite). The interface is arena.html in the same fol
 Needs only the Python 3.8+ standard library.
 """
 import codecs, copy, glob, json, os, platform, random, re, zipfile, xml.etree.ElementTree as ET, secrets, shutil, tempfile, shlex, signal, sqlite3, subprocess, sys, threading, time, uuid, webbrowser
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -35,11 +36,12 @@ DEFAULT_CFG = {
     "workspace": "~/AI Arena",  # folder the tools run in when no working folder is set; all Arena sessions are kept here
     "judge_timeout": 900,  # seconds the scoring model may take; it reads every answer and may look things up, which often takes 3-5 minutes
     "timeout": 600,
+    "idle_timeout": 180,  # seconds of total silence (no stdout/stderr) before treating a running CLI as hung/disconnected
     "tools": {
         "claude": {
             "cmd": ["claude", "-p", "{prompt}", "--output-format", "stream-json",
                     "--verbose", "--include-partial-messages"],
-            "parser": "claude_stream", "color": "#d97757",
+            "parser": "claude_stream", "color": "#d97757", "auth_check": "claude",
             "package": "@anthropic-ai/claude-code",
             "login": "claude", "hint": "Follow the prompts to sign in, then type /exit",
             "resume_args": ["--resume", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
@@ -55,7 +57,7 @@ DEFAULT_CFG = {
             "models": [{"id": "opus", "label": "Opus"}, {"id": "sonnet", "label": "Sonnet"},
                        {"id": "haiku", "label": "Haiku"}, {"id": "fable", "label": "Fable"}]},
         "codex": {"cmd": ["codex", "exec", "--json", "--skip-git-repo-check", "{prompt}"],
-                  "parser": "codex_json", "color": "#10a37f",
+                  "parser": "codex_json", "color": "#10a37f", "auth_check": "codex",
                   "resume_args": ["resume", "{session}"], "resume_pos": "prompt",  # codex exec [options] resume <ID> <question>
                   "continue_app": "Codex App", "continue_url": "codex://threads/{session}",
                   "continue_terminal": ["resume", "{session}"],
@@ -76,7 +78,7 @@ DEFAULT_CFG = {
                               {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"}]},
         "antigravity": {
             "label": "Antigravity", "cmd": ["agy", "-p", "{prompt}", "--output-format", "stream-json"],
-            "parser": "agy_stream", "color": "#7b61ff",
+            "parser": "agy_stream", "color": "#7b61ff", "auth_check": "antigravity",
             "resume_args": ["--conversation", "{session}"], "add_dir_args": ["--add-dir", "{dir}"],
             "continue_app": "Antigravity", "continue_antigravity": True,
             "continue_terminal": ["--conversation", "{session}"],
@@ -88,7 +90,7 @@ DEFAULT_CFG = {
             "models_cmd": ["agy", "models"], "models": []},
         "grok": {"role": "judge",  # the scoring model; it does not compete
                  "label": "Grok", "cmd": ["grok", "--no-auto-update", "-p", "{prompt}", "--output-format", "plain"],
-                 "color": "#475569", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
+                 "color": "#475569", "auth_check": "grok", "install_script": "curl -fsSL https://x.ai/cli/install.sh | bash",
                  "login": "grok login", "hint": "A browser opens; sign in with your xAI / X account",
                  "model_flag": "-m", "default_label": "Default",
                  "models": [{"id": "grok-4.7", "label": "Grok 4.7"}, {"id": "grok-4.5", "label": "Grok 4.5"}]},
@@ -467,6 +469,259 @@ def which(exe):
 
 
 JOBS = {}  # install jobs: tool -> {"running", "ok", "log"}
+HEALTH_CACHE = {}  # tool -> {"state": str, "detail": str, "checked_at": float}
+HEALTH_LOCK = threading.Lock()
+HEALTH_REFRESH_LOCK = threading.Lock()
+HEALTH_TTL = 300
+
+AUTH_ERR_RE = re.compile(
+    r"(?i)("
+    r"\bnot logged in\b|\bnot authenticated\b|\bunauthenticated\b|\bunauthorized\b|"
+    r"\bplease sign in\b|\bplease log in\b|\blogin required\b|\bsign[- ]?in required\b|"
+    r"\bauthentication[_ ]?(?:failed|error|required)\b|\bauth[_ ]?(?:failed|error|expired)\b|"
+    r"\binvalid[_ ]?(?:api[_ ]?key|bearer|token|credentials?)\b|"
+    r"\b(?:token|session|login|oauth|credential)s?\b[^\n]{0,30}\b(?:expired|invalid|revoked)\b|"
+    r"\bre-?authenticate\b|\b401\b[^\n]{0,40}\b(?:unauthorized|auth|token|key)\b|"
+    r"\bhttp(?:s)?\s*401\b|\bstatus(?:\s*code)?[:=\s]+401\b|"
+    r"launch the cli without arguments to sign in|"
+    r"run\s+[`'\"]?(?:claude|codex|agy|grok)(?:\s+auth)?\s+login\b|"
+    r"please run\s+/login\b"
+    r")"
+)
+INTERACTIVE_AUTH_PROMPT_RE = re.compile(
+    r"(?i)("
+    r"authentication required\.\s*please visit the url to log in|"
+    r"waiting for authentication\s*\(timeout|"
+    r"paste the authorization code here and press enter|"
+    r"please visit the following url to authorize"
+    r")"
+)
+OFFLINE_ERR_RE = re.compile(
+    r"(?i)("
+    r"\beconnrefused\b|\beconnreset\b|\betimedout\b|\benotfound\b|\beai_again\b|"
+    r"\behostunreach\b|\benetunreach\b|\berr_network\b|\beconnaborted\b|"
+    r"\bfetch failed\b|\bfailed to fetch\b|\bnetwork\s+error\b|\bno internet\b|"
+    r"\bconnection\s+(?:refused|reset|closed|aborted|timed\s*out|failed|lost|dropped)\b|"
+    r"\bcould not resolve host\b|\bgetaddrinfo\b|\bdns\s+(?:lookup\s+)?failed\b|"
+    r"\bsocket hang up\b|\btls\s+handshake\b|\bssl\s+(?:error|handshake)\b|"
+    r"\bunable to connect\b|\bcannot connect\b|\bserver disconnected\b|"
+    r"\bunexpected eof\b|\bupstream connect error\b|\bservice unavailable\b|"
+    r"\b(?:502|503|504)\s+(?:bad gateway|service unavailable|gateway timeout)\b|"
+    r"\bnetwork is unreachable\b|\bconnecttimeout\b"
+    r")"
+)
+
+
+def _short_detail(text, limit=120):
+    cleaned = ANSI_RE.sub("", text or "").replace("\r", "\n")
+    for raw in cleaned.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("WARNING:") or line.startswith("[auth]") or line.startswith("[chat") or line.startswith("[resume]"):
+            continue
+        if re.fullmatch(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+.*", line) and "Fetching" in line:
+            continue
+        return line[:limit]
+    return ""
+
+
+def classify_failure(log_text, out_text="", had_error=False):
+    """Classify a CLI failure into 'auth_required', 'offline', 'error', or ''."""
+    log_clean = ANSI_RE.sub("", log_text or "")
+    out_clean = ANSI_RE.sub("", out_text or "").strip()
+    sample = log_clean + ("\n" + out_clean if out_clean and len(out_clean) < 1200 else "")
+    if AUTH_ERR_RE.search(sample):
+        return "auth_required"
+    if OFFLINE_ERR_RE.search(sample):
+        return "offline"
+    if had_error:
+        return "error"
+    return ""
+
+
+def record_health(name, state, detail=""):
+    with HEALTH_LOCK:
+        prev = HEALTH_CACHE.get(name) or {}
+        if state == "ready" and not detail and prev.get("state") == "ready":
+            detail = prev.get("detail", "")
+        HEALTH_CACHE[name] = {"state": state, "detail": detail, "checked_at": time.time()}
+
+
+def _record_run_health(name, status, log_text="", out_text=""):
+    if status == "ok":
+        record_health(name, "ready")
+    elif status == "auth_required":
+        record_health(name, "auth_required", _short_detail(log_text or out_text))
+    elif status == "offline":
+        record_health(name, "offline", _short_detail(log_text or out_text))
+    elif status == "idle_timeout":
+        record_health(name, "timeout", _short_detail(log_text))
+    elif status == "not_installed":
+        record_health(name, "missing", _short_detail(log_text))
+
+
+def _iso_expired(value):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt <= datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+
+def _antigravity_use_arena_dir(spec):
+    """True when AI Arena runs `agy` against ~/.gemini/antigravity-arena (desktop sync enabled)."""
+    if not (spec and spec.get("continue_antigravity")):
+        return False
+    try:
+        return bool(get_setting("antigravity_desktop_sync", False))
+    except Exception:
+        return False
+
+
+def _login_command(tool, spec):
+    cmd = (spec.get("login") or "").strip()
+    if not cmd:
+        return ""
+    if tool == "antigravity" and _antigravity_use_arena_dir(spec) and "--app_data_dir" not in cmd:
+        return f"{cmd} --app_data_dir={ANTIGRAVITY_ARENA_APP_DIR}"
+    return cmd
+
+
+def check_tool_health(name, spec, path, lang="en"):
+    """Actively probe whether a tool is signed in / reachable. Returns (state, detail)."""
+    if spec.get("transport") == "openai_responses":
+        return ("ready", "Responses API") if openai_ready() else ("auth_required", M(lang, "health_api_key"))
+    if not path:
+        return "missing", M(lang, "health_missing", exe=spec["cmd"][0])
+    kind = spec.get("auth_check") or ""
+    if not kind:
+        return "unknown", ""
+    env = child_env()
+    for k in spec.get("strip_env") or []:
+        env.pop(k, None)
+    try:
+        if kind == "claude":
+            r = subprocess.run([path, "auth", "status"], capture_output=True, text=True, timeout=15,
+                               env=env, stdin=subprocess.DEVNULL)
+            raw = ANSI_RE.sub("", r.stdout or "").strip()
+            obj = None
+            try:
+                i, j = raw.find("{"), raw.rfind("}")
+                if i >= 0 and j > i:
+                    obj = json.loads(raw[i:j + 1])
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict) and "loggedIn" in obj:
+                if obj.get("loggedIn"):
+                    if _iso_expired(obj.get("loginExpiresAt")):
+                        return "auth_required", M(lang, "health_expired")
+                    parts = [str(obj.get(k) or "").strip() for k in ("authMethod", "email")]
+                    return "ready", " · ".join(x for x in parts if x)[:100]
+                return "auth_required", M(lang, "health_not_logged_in")
+            combined = (r.stdout or "") + "\n" + (r.stderr or "")
+            cls = classify_failure(combined)
+            if cls:
+                fallback = M(lang, "health_not_logged_in" if cls == "auth_required" else "health_offline")
+                return cls, _short_detail(combined) or fallback
+            return ("ready", _short_detail(combined)) if r.returncode == 0 else ("offline", _short_detail(combined) or M(lang, "health_offline"))
+        if kind == "codex":
+            r = subprocess.run([path, "login", "status"], capture_output=True, text=True, timeout=15,
+                               env=env, stdin=subprocess.DEVNULL)
+            combined = ANSI_RE.sub("", (r.stdout or "") + "\n" + (r.stderr or ""))
+            low = combined.lower()
+            if "not logged in" in low:
+                return "auth_required", M(lang, "health_not_logged_in")
+            if r.returncode == 0 and "logged in" in low:
+                line = next((ln.strip() for ln in combined.splitlines() if "logged in" in ln.lower()), "")
+                return "ready", line[:100]
+            cls = classify_failure(combined)
+            if cls:
+                fallback = M(lang, "health_not_logged_in" if cls == "auth_required" else "health_offline")
+                return cls, _short_detail(combined) or fallback
+            return ("ready", _short_detail(combined)) if r.returncode == 0 else ("auth_required", _short_detail(combined) or M(lang, "health_not_logged_in"))
+        if kind == "antigravity":
+            args = ["models"]
+            if _antigravity_use_arena_dir(spec):
+                args = [f"--app_data_dir={ANTIGRAVITY_ARENA_APP_DIR}", *args]
+            tmp = tempfile.mkdtemp(prefix="arena-health-")
+            try:
+                rc, out, err = run_streaming(path, args, spec, tmp, 20, lambda t: None,
+                                             stop_on_auth_prompt=True)
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            models = parse_models(out)
+            if rc == 0 and models:
+                if not MODEL_CACHE.get(name):
+                    MODEL_CACHE[name] = models
+                return "ready", M(lang, "health_models_ok", n=len(models))
+            combined = ANSI_RE.sub("", (out or "") + "\n" + (err or ""))
+            cls = classify_failure(combined)
+            if cls == "auth_required":
+                return "auth_required", M(lang, "health_not_logged_in")
+            if rc is None:
+                return "timeout", M(lang, "detect_timeout")
+            if cls == "offline":
+                return "offline", _short_detail(combined) or M(lang, "health_offline")
+            if rc == 0:
+                return "ready", ""
+            return "offline", _short_detail(combined) or M(lang, "health_offline")
+        if kind == "grok":
+            r = subprocess.run([path, "--no-auto-update", "models"], capture_output=True, text=True, timeout=15,
+                               env=env, stdin=subprocess.DEVNULL)
+            combined = ANSI_RE.sub("", (r.stdout or "") + "\n" + (r.stderr or ""))
+            low = combined.lower()
+            if "not authenticated" in low or "not logged in" in low or "please sign in" in low:
+                return "auth_required", M(lang, "health_not_logged_in")
+            if r.returncode == 0 and ("logged in" in low or "available models" in low):
+                line = next((ln.strip() for ln in combined.splitlines() if "logged in" in ln.lower()), "")
+                return "ready", line[:100]
+            cls = classify_failure(combined)
+            if cls:
+                fallback = M(lang, "health_not_logged_in" if cls == "auth_required" else "health_offline")
+                return cls, _short_detail(combined) or fallback
+            return ("ready", _short_detail(combined)) if r.returncode == 0 else ("offline", _short_detail(combined) or M(lang, "health_offline"))
+    except subprocess.TimeoutExpired:
+        return "timeout", M(lang, "detect_timeout")
+    except Exception as e:
+        return "offline", str(e)[:120]
+    return "unknown", ""
+
+
+def check_all_health(lang="en", force=False):
+    """Return cached or freshly probed connection/auth status for all enabled tools and the judge."""
+    cfg = load_cfg()
+    jn = judge_tool(cfg)
+    names = enabled_tools(cfg) + ([jn] if jn and jn not in enabled_tools(cfg) else [])
+    now = time.time()
+    if not force:
+        with HEALTH_LOCK:
+            if names and all(n in HEALTH_CACHE and now - HEALTH_CACHE[n]["checked_at"] < HEALTH_TTL for n in names):
+                return {n: dict(HEALTH_CACHE[n]) for n in names}
+    with HEALTH_REFRESH_LOCK:
+        now = time.time()
+        if not force:
+            with HEALTH_LOCK:
+                if names and all(n in HEALTH_CACHE and now - HEALTH_CACHE[n]["checked_at"] < HEALTH_TTL for n in names):
+                    return {n: dict(HEALTH_CACHE[n]) for n in names}
+        def probe(name, spec):
+            path = None if spec.get("transport") == "openai_responses" else which(spec["cmd"][0])
+            state, detail = check_tool_health(name, spec, path, lang)
+            record_health(name, state, detail)
+
+        ths = [threading.Thread(target=probe, args=(n, cfg["tools"][n]), daemon=True) for n in names]
+        for th in ths:
+            th.start()
+        for th in ths:
+            th.join(25)
+    with HEALTH_LOCK:
+        return {n: dict(HEALTH_CACHE[n]) for n in names if n in HEALTH_CACHE}
+
+
+def start_refresh_health(lang="en"):
+    threading.Thread(target=check_all_health, args=(lang, True), daemon=True).start()
 
 
 def doctor(lang="en"):
@@ -477,8 +732,10 @@ def doctor(lang="en"):
     def check(name, spec):
         exe = spec["cmd"][0]
         if spec.get("transport") == "openai_responses":
+            conn, conn_detail = check_tool_health(name, spec, None, lang)
+            record_health(name, conn, conn_detail)
             res[name] = {"name": name, "api": True, "ready": openai_ready(), "path": "api.openai.com",
-                         "version": "Responses API"}
+                         "version": "Responses API", "conn": conn, "conn_detail": conn_detail}
             return
         path, ver = which(exe), ""
         if path:
@@ -489,8 +746,12 @@ def doctor(lang="en"):
                 ver = lines[0][:80] if lines else ""
             except Exception:
                 ver = M(lang, "detect_timeout")
-        res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""), "install": bool(spec.get("package") or spec.get("install_script")),
-                     "login": spec.get("login") or "", "hint": tool_text(lang, name, spec, "hint")}
+        conn, conn_detail = check_tool_health(name, spec, path, lang)
+        record_health(name, conn, conn_detail)
+        res[name] = {"name": name, "exe": exe, "path": path, "version": ver, "role": spec.get("role", ""),
+                     "install": bool(spec.get("package") or spec.get("install_script")),
+                     "login": _login_command(name, spec), "hint": tool_text(lang, name, spec, "hint"),
+                     "conn": conn, "conn_detail": conn_detail}
 
     jn = judge_tool(cfg)
     names = enabled_tools(cfg) + ([jn] if jn and jn not in enabled_tools(cfg) else [])
@@ -616,7 +877,7 @@ def start_install(tool, lang="en"):
 
 def open_login(tool, lang="en"):
     spec = load_cfg()["tools"].get(tool) or {}
-    cmd = spec.get("login")
+    cmd = _login_command(tool, spec)
     if not cmd:
         return M(lang, "no_login")
     if sys.platform != "darwin":
@@ -1399,8 +1660,8 @@ RUNS = {}
 class ClaudeStream:
     """Parse the JSONL from `claude -p --output-format stream-json`; non-JSON lines are passed through as text."""
 
-    def __init__(self):
-        self.buf, self.delta, self.text_seen = "", False, False
+    def __init__(self, lang="en"):
+        self.buf, self.delta, self.text_seen, self.lang, self.had_error = "", False, False, lang, False
 
     def feed(self, chunk):
         self.buf += chunk
@@ -1449,17 +1710,27 @@ class ClaudeStream:
                     ("log", f"[init] model={o.get('model')}\n")]
         if t == "result":
             res = [("session", o.get("session_id") or "")]
-            if not self.delta and not self.text_seen and o.get("result"):
+            if o.get("is_error"):
+                self.had_error = True
+                msg = str(o.get("result") or o.get("error") or "").strip()
+                if msg:
+                    res.append(("log", M(self.lang, "tag_err") + msg + "\n"))
+            elif not self.delta and not self.text_seen and o.get("result"):
                 res.append(("out", o["result"]))
             res.append(("log", f"[result] turns={o.get('num_turns')} cost=${o.get('total_cost_usd')} "
                                f"duration={o.get('duration_ms')}ms\n"))
             return res
+        if t == "error":
+            self.had_error = True
+            msg = o.get("error") or o.get("message") or o
+            txt = msg if isinstance(msg, str) else json.dumps(msg, ensure_ascii=False)
+            return [("log", M(self.lang, "tag_err") + txt[:500] + "\n")]
         return []
 
 
 class LineParser:
     def __init__(self, lang="en"):
-        self.buf, self.lang = "", lang
+        self.buf, self.lang, self.had_error = "", lang, False
 
     def feed(self, chunk):
         self.buf += chunk
@@ -1512,11 +1783,13 @@ class CodexJson(LineParser):
             if t == "item.started" and ty == "command_execution":
                 return [("log", M(self.lang, "tag_cmd") + f"{it.get('command', '')}\n")]
             if ty == "error":
+                self.had_error = True
                 return [("log", M(self.lang, "tag_err") + f"{it.get('message', '')}\n")]
             return []
         if t == "turn.completed":
             return [("log", M(self.lang, "tag_usage") + f"{json.dumps(o.get('usage') or {}, ensure_ascii=False)}\n")]
         if t in ("turn.failed", "error"):
+            self.had_error = True
             return [("log", f"[{t}] {json.dumps(o.get('error') or o.get('message') or o, ensure_ascii=False)[:500]}\n")]
         return []
 
@@ -1549,11 +1822,18 @@ class AgyStream(LineParser):
 
     def __init__(self, lang="en"):
         super().__init__(lang)
-        self.got, self.raw, self.out_any = False, [], False
+        self.got, self.raw, self.out_any, self.auth_prompted = False, [], False, False
 
     def _line(self, line):
-        if line.strip() and len(self.raw) < 200:
-            self.raw.append(line.strip()[:1500])
+        s = line.strip()
+        if s and len(self.raw) < 200:
+            self.raw.append(s[:1500])
+        if s and not self.got and (self.auth_prompted or INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", s))):
+            try:
+                json.loads(s)
+            except ValueError:
+                self.auth_prompted = True
+                return [("log", s + "\n")]
         res = super()._line(line)
         if any(k == "out" and v for k, v in res):
             self.out_any = True
@@ -1594,14 +1874,19 @@ class AgyStream(LineParser):
                     res.append(("out", resp))
             status = deep_find(o, ("status",))
             if status and status.upper() != "SUCCESS":
+                self.had_error = True
                 res.append(("log", M(self.lang, "tag_status") + f"{status} {deep_find(o, ('error',))}\n"))
             usage = o.get("usage") or d.get("usage")
             if usage:
                 res.append(("log", M(self.lang, "tag_usage") + f"{json.dumps(usage, ensure_ascii=False)}\n"))
+        elif ev == "error":
+            self.had_error = True
+            err = deep_find(o, ("error", "message", "detail")) or json.dumps(o, ensure_ascii=False)[:500]
+            res.append(("log", M(self.lang, "tag_err") + f"{err}\n"))
         return res
 
 
-PARSERS = {"claude_stream": lambda lang="en": ClaudeStream(), "codex_json": CodexJson, "agy_stream": AgyStream}
+PARSERS = {"claude_stream": ClaudeStream, "codex_json": CodexJson, "agy_stream": AgyStream}
 
 
 
@@ -1908,7 +2193,7 @@ MODEL_RE = re.compile(r"(?m)^\s*model:\s*([\w.\-:/@]+)")  # e.g. "model: gpt-…
 
 def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", session="", history=None, chat=False,
               peers=None,
-              attach="", attach_dir="", attach_n=0):
+              attach="", attach_dir="", attach_n=0, idle_timeout=None):
     base, extra, note = list(spec["cmd"]), [], ""
     lang = getattr(run, "lang", "en")
     chat_in_system = chat and bool(spec.get("system_prompt_args"))
@@ -1990,8 +2275,11 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     if uses_openai:
         env["OPENAI_API_KEY"] = os.environ.get("ARENA_OPENAI_API_KEY", "")
 
+    if idle_timeout is None:
+        idle_timeout = DEFAULT_CFG["idle_timeout"]
+
     def attempt(seconds):
-        return _stream_command(run, name, spec, cmd, cwd, seconds, lang, env, uses_openai, prompt)
+        return _stream_command(run, name, spec, cmd, cwd, seconds, lang, env, uses_openai, prompt, idle_timeout=idle_timeout)
 
     status, output, attempt_log, actual, sess = attempt(timeout)
     remaining = timeout - (time.monotonic() - t0)
@@ -2006,6 +2294,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
         base[resume_index] = cmd[resume_index] = "fork"
         shown = " ".join(shlex.quote(a) for a in base)
         status, output, attempt_log, actual, sess = attempt(remaining)
+    _record_run_health(name, status, attempt_log, output)
     secs = round(time.monotonic() - t0, 1)
     q("INSERT OR REPLACE INTO outputs(run_id, tool, status, seconds, output, log, cmd, model, actual_model, effort, session) "
       "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -2016,7 +2305,7 @@ def exec_tool(run, name, spec, prompt, cwd, timeout, model="", effort="", sessio
     _finish_tool(run, name)
 
 
-def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, prompt):
+def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, prompt, idle_timeout=0):
     status = "ok"
     out, log = [], []
     actual, errhead, sess = [""], [""], [""]
@@ -2080,6 +2369,9 @@ def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, 
                 (out if kind == "out" else log).append(text)
                 run.emit({"tool": name, "type": kind, "data": text})
 
+        last_activity = [time.monotonic()]
+        auth_prompt = threading.Event()
+
         def pump(fd, is_err):
             dec = codecs.getincrementaldecoder("utf-8")("replace")
             while True:
@@ -2087,6 +2379,8 @@ def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, 
                     b = os.read(fd, 4096)
                 except OSError:  # the pseudo-terminal returns EIO after the child process exits
                     b = b""
+                if b:
+                    last_activity[0] = time.monotonic()
                 txt = dec.decode(b, final=not b)
                 if ptx and not is_err:
                     txt = ptx.feed(txt) + ("" if b else ptx.flush())
@@ -2097,9 +2391,16 @@ def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, 
                         m = MODEL_RE.search(errhead[0])
                         if m:
                             push("meta", m.group(1))
+                    if not out and not auth_prompt.is_set() and INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", "".join(log[-20:]))):
+                        auth_prompt.set()
                 else:
                     for k, v in (parser.feed(txt) if parser else [("out", txt)]):
                         push(k, v)
+                    if not auth_prompt.is_set():
+                        if not out and log and INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", "".join(log[-20:]))):
+                            auth_prompt.set()
+                        elif not getattr(parser, "got", False) and len(out) <= 20 and INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", "".join(out[-20:]))):
+                            auth_prompt.set()
                 if not b:
                     break
             if parser and not is_err:
@@ -2110,12 +2411,41 @@ def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, 
                threading.Thread(target=pump, args=(p.stderr.fileno(), True), daemon=True)]
         for th in ths:
             th.start()
-        try:
-            p.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            status = "timeout"
-            kill(p)
-            p.wait()
+        deadline = time.monotonic() + timeout
+        while True:
+            if auth_prompt.is_set():
+                status = "auth_required"
+                kill(p)
+                p.wait()
+                break
+            now = time.monotonic()
+            rem_total = deadline - now
+            if rem_total <= 0:
+                status = "timeout"
+                kill(p)
+                p.wait()
+                break
+            if idle_timeout and idle_timeout > 0:
+                rem_idle = idle_timeout - (now - last_activity[0])
+                if rem_idle <= 0:
+                    status = "idle_timeout"
+                    msg = M(lang, "idle_timeout_note", sec=int(round(idle_timeout)))
+                    log.append(msg)
+                    run.emit({"tool": name, "type": "log", "data": msg})
+                    kill(p)
+                    p.wait()
+                    break
+                step = min(0.2, rem_total, rem_idle)
+            else:
+                step = min(0.2, rem_total)
+            try:
+                p.wait(timeout=max(0.01, step))
+                break
+            except subprocess.TimeoutExpired:
+                if run.cancelled:
+                    kill(p)
+                    p.wait()
+                    break
         for th, stream in zip(ths, (p.stdout, p.stderr)):
             th.join(5)
             if stream is not None and not th.is_alive():
@@ -2125,10 +2455,18 @@ def _stream_command(run, name, spec, cmd, cwd, timeout, lang, env, uses_openai, 
                 os.close(out_fd)
             except OSError:
                 pass
+        out_text, log_text = "".join(out), "".join(log)
         if run.cancelled:
             status = "canceled"
-        elif status == "ok" and p.returncode != 0:
-            status = f"exit {p.returncode}"
+        elif status == "ok":
+            had_err = bool(getattr(parser, "had_error", False))
+            if p.returncode != 0:
+                status = classify_failure(log_text, out_text) or f"exit {p.returncode}"
+            elif not out_text.strip():
+                cls = classify_failure(log_text, out_text, had_error=had_err)
+                if cls:
+                    status = cls
+        return status, out_text, log_text, actual[0], sess[0]
     if not p:
         run.emit({"tool": name, "type": "log", "data": "".join(log)})
     return status, "".join(out), "".join(log), actual[0], sess[0]
@@ -2146,13 +2484,13 @@ def _finish_tool(run, name):
         run.cond.notify_all()
 
 
-def run_tool(run, name, *args):
+def run_tool(run, name, *args, **kwargs):
     """Thread entry for one tool of a round. exec_tool does the work; if it raises anywhere before its own
     bookkeeping, the tool is recorded as start_failed here so the round still ends. Without this the page
     would show the tool as running forever, automatic scoring would never start, and --idle-exit would
     never see the server as idle."""
     try:
-        exec_tool(run, name, *args)
+        exec_tool(run, name, *args, **kwargs)
     except Exception as exc:
         with run.cond:
             unfinished = name in run.pending
@@ -2358,7 +2696,7 @@ def start_judge(rid, model="", lang="en"):
     return ""
 
 
-def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30):
+def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30, stop_on_auth_prompt=False):
     """Run a CLI and call on_text(accumulated output) as it reads. Return (exit code or None on timeout, output, stderr).
     With `grace`, a command that is still writing when `timeout` is reached is not cut off mid-answer: it may
     go on for up to `grace` more seconds, for as long as new output keeps arriving at least every `quiet` seconds.
@@ -2369,6 +2707,7 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30):
     use_pty = bool(spec.get("pty")) and os.name == "posix"
     buf, err, out_fd = [], [], None
     last_out = [0.0]  # when output last arrived
+    auth_prompt = threading.Event()
     if use_pty:
         import pty, termios, fcntl, struct
         out_fd, slave = pty.openpty()
@@ -2402,29 +2741,61 @@ def run_streaming(exe, args, spec, cwd, timeout, on_text, grace=0, quiet=30):
                 buf.append(t)
                 last_out[0] = time.time()
                 on_text("".join(buf))
+                if stop_on_auth_prompt and not auth_prompt.is_set() and INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", "".join(buf[-20:]))):
+                    auth_prompt.set()
             if not b:
                 break
 
     def pump_err():
-        for chunk in iter(lambda: p.stderr.read(4096), b""):
-            err.append(chunk.decode("utf-8", "replace"))
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        err_fd = p.stderr.fileno()
+        while True:
+            try:
+                b = os.read(err_fd, 4096)
+            except OSError:
+                b = b""
+            t = dec.decode(b, final=not b)
+            if t:
+                err.append(t)
+                if stop_on_auth_prompt and not auth_prompt.is_set() and INTERACTIVE_AUTH_PROMPT_RE.search(ANSI_RE.sub("", "".join(err[-20:]))):
+                    auth_prompt.set()
+            if not b:
+                break
 
     ths = [threading.Thread(target=pump_out, daemon=True), threading.Thread(target=pump_err, daemon=True)]
     for th in ths:
         th.start()
     rc = None
-    try:
-        rc = p.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        end = time.time() + grace
-        while rc is None and time.time() < end and time.time() - last_out[0] < quiet:  # mid-answer: let it finish
+    if stop_on_auth_prompt:
+        deadline = time.time() + timeout
+        while True:
+            if auth_prompt.is_set():
+                kill(p)
+                p.wait()
+                break
+            rem = deadline - time.time()
+            if rem <= 0:
+                kill(p)
+                p.wait()
+                break
             try:
-                rc = p.wait(timeout=min(0.5, quiet, max(0.01, end - time.time())))
+                rc = p.wait(timeout=min(0.2, max(0.01, rem)))
+                break
             except subprocess.TimeoutExpired:
                 pass
-        if rc is None:
-            kill(p)
-            p.wait()
+    else:
+        try:
+            rc = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            end = time.time() + grace
+            while rc is None and time.time() < end and time.time() - last_out[0] < quiet:  # mid-answer: let it finish
+                try:
+                    rc = p.wait(timeout=min(0.5, quiet, max(0.01, end - time.time())))
+                except subprocess.TimeoutExpired:
+                    pass
+            if rc is None:
+                kill(p)
+                p.wait()
     for th in ths:
         th.join(5)
     if use_pty:
@@ -2508,6 +2879,7 @@ def start_run(prompt, tools, cwd, tag, models=None, efforts=None, parent=None, j
                                                  None if sessions.get(t) else histories.get(t), bool(chat),
                                                  peers.get(t), api_attach if uses_openai else attach,
                                                  attach_dir if not uses_openai else "", len(metas)),
+                         kwargs={"idle_timeout": cfg.get("idle_timeout", DEFAULT_CFG["idle_timeout"])},
                          daemon=True).start()
     return rid, tools, models, efforts, shared
 
@@ -2600,6 +2972,8 @@ class H(BaseHTTPRequestHandler):
             self._json(j) if j else self._json({"error": M(self.lang, "no_judgment")}, 404)
         elif p == "/api/doctor":
             self._json(doctor(self.lang))
+        elif p == "/api/health":
+            self._json({"tools": check_all_health(self.lang, force=qs.get("refresh") == "1")})
         elif p == "/api/prompts":
             self._json(list_prompts(self.lang))
         elif p == "/api/jobs":
@@ -2721,6 +3095,9 @@ class H(BaseHTTPRequestHandler):
             for key in keys:
                 if key in b:
                     set_setting(key, bool(b[key]))
+            if "antigravity_desktop_sync" in b:
+                with HEALTH_LOCK:
+                    HEALTH_CACHE.pop("antigravity", None)
             if "judge_tool" in b:  # the scoring model; must be one of the tools that can score
                 cfg = load_cfg()
                 want = str(b["judge_tool"] or "")
@@ -3143,7 +3520,13 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 .state{font-size:12px;padding:1px 9px;border-radius:999px;white-space:nowrap;background:var(--soft);color:var(--muted)}
 .state.run{color:var(--focus);background:color-mix(in srgb,var(--focus) 12%,transparent)}
 .state.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.state.warn{color:var(--gold);background:var(--gold-bg)}
 .state.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.sdetail{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.4;word-break:break-word}
+.lhealth{font-size:11px;padding:1px 7px;border-radius:999px;border:0;cursor:pointer;white-space:nowrap;flex:none;font-weight:500}
+.lhealth.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.lhealth.warn{color:var(--gold);background:var(--gold-bg)}
+.ph .btn{margin:0 4px 0 2px;vertical-align:baseline}
 .tm{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:3.2em;text-align:right}
 .body{flex:1;padding:8px 20px 14px;max-height:min(60vh,620px);overflow:auto;overscroll-behavior:contain;min-height:150px}
 .col.full .body{max-height:none}
@@ -3410,7 +3793,7 @@ function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.te
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
 /* ---------- Config and model pickers ---------- */
-let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
+let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},HEALTH={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
 const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // hidden whenever no API key is set
 const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
 const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
@@ -3421,13 +3804,21 @@ const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 /* A model ID that already names its level (gemini-4-neon-high) fixes the effort: the picker shows that level and is disabled, and the server sends no separate effort flag. */
 const modelEffort=t=>{const m=/-(minimal|low|medium|high|xhigh|max)$/.exec(SEL[t]?.model||'');return m&&(CFG.tools[t].efforts||[]).includes(m[1])?m[1]:''};
+function laneHealthBadge(t){
+  const h=HEALTH[t];if(!h)return '';
+  const map={auth_required:['lane.authRequired','warn'],offline:['lane.offline','bad'],timeout:['lane.timeout','warn'],missing:['lane.missing','bad']};
+  const m=map[h.state];if(!m)return '';
+  const tip=[h.detail,T('lane.healthHint')].filter(Boolean).join('\n');
+  return `<button class="lhealth ${m[1]}" type="button" data-go="env" title="${esc(tip)}">${esc(T(m[0]))}</button>`;
+}
+async function refreshHealth(force){try{const d=await api('/api/health'+(force?'?refresh=1':''));HEALTH=d.tools||{};renderLanes()}catch(e){}}
 function renderLanes(){
   const tools=visibleTools();
   $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
   $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t],own=modelEffort(t);
     const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
-      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
+      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>${laneHealthBadge(t)}
       <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
@@ -3556,9 +3947,12 @@ function makeCol(r,t,parent){
   $('.win',c).onclick=()=>setWinner(r,r.winner===t?'':t);
   parent.appendChild(c);paint(r,t);
 }
-function content(s){
+function content(s,t){
   if(s.out)return s.raw?`<pre class="rawtxt">${esc(clean(s.out))}</pre>`:`<div class="md">${md(s.out)}</div>`;
   if(s.status==='not_installed')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
+  if(s.status==='auth_required')return `<p class="ph">${T('c.authRequired')}${t?`<button class="btn sm primary" type="button" data-login="${esc(t)}">${T('c.signInNow')}</button>`:''}<a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
+  if(s.status==='offline')return `<p class="ph">${T('c.offline')} <a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
+  if(s.status==='idle_timeout')return `<p class="ph">${T('c.idleTimeout')} <a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
   if(s.status==='run')return `<p class="ph thinking">${T('c.thinking')}</p>`;
   if(s.status)return `<p class="ph">${T('c.noOut')}</p>`;
   return `<p class="ph">${T('st.queued')}</p>`;
@@ -3570,7 +3964,7 @@ function paint(r,t){dirty.set(r.id+'|'+t,[r,t]);if(!raf)raf=requestAnimationFram
 function render(r,t){
   const s=r.S[t],c=s&&s.el;if(!c)return;
   const body=$('.body',c),atBottom=body.scrollHeight-body.scrollTop-body.clientHeight<60;
-  body.innerHTML=content(s);decorate(body);
+  body.innerHTML=content(s,t);decorate(body);
   c.classList.toggle('full',s.full);
   if(s.status==='run'&&atBottom&&!s.full)body.scrollTop=body.scrollHeight;
   c.classList.toggle('overflow',s.full||body.scrollHeight>body.clientHeight+8);
@@ -3598,7 +3992,9 @@ function openStream(r){
     const s=r.S[ev.tool];if(!s)return;
     if(ev.type==='start'){s.status='run';s.t0=Date.now();if(ev.model!=null)s.model=ev.model;if(ev.effort!=null)s.effort=ev.effort;setRunning(r,true);$('.ch b',s.el).title=ev.cmd||''}
     else if(ev.type==='out')s.out+=ev.data;else if(ev.type==='log')s.log+=ev.data;
-    else if(ev.type==='meta')s.actual=ev.model;else if(ev.type==='done'){s.status=ev.status;s.secs=ev.seconds}
+    else if(ev.type==='meta')s.actual=ev.model;else if(ev.type==='done'){s.status=ev.status;s.secs=ev.seconds;
+      const hm={ok:'ready',auth_required:'auth_required',offline:'offline',idle_timeout:'timeout',not_installed:'missing'};
+      if(hm[ev.status]){HEALTH[ev.tool]={state:hm[ev.status],detail:ev.status==='ok'?(HEALTH[ev.tool]?.state==='ready'?HEALTH[ev.tool].detail:''):''};renderLanes()}}
     paint(r,ev.tool)};
 }
 function paintStars(r,t){$$('.star',r.S[t].el).forEach(b=>b.classList.toggle('on',+b.dataset.v<=r.S[t].score))}
@@ -3888,7 +4284,7 @@ function openReader(r,t){READER.r=r;READER.t=t;$('#reader').hidden=false;documen
 function closeReader(){READER.r=null;$('#reader').hidden=true;document.documentElement.classList.remove('lock')}
 function renderReader(reset){const {r,t}=READER;if(!r)return;const s=r.S[t],doc=$('#rdoc'),y=doc.scrollTop;
   $('#rtabs').innerHTML=r.tools.map(x=>`<button class="rtab${x===t?' on':''}" data-t="${esc(x)}" style="--c:${esc(color(x))}"><span class="dot"></span>${esc(tname(x))}<small>${esc(modelText(r,x))}${r.S[x]?.effort?' '+esc(r.S[x].effort):''}</small></button>`).join('');
-  $('#rq').textContent=r.meta.prompt;doc.innerHTML=content(s);decorate(doc);doc.scrollTop=reset?0:y;$('#rraw').setAttribute('aria-pressed',s.raw)}
+  $('#rq').textContent=r.meta.prompt;doc.innerHTML=content(s,t);decorate(doc);doc.scrollTop=reset?0:y;$('#rraw').setAttribute('aria-pressed',s.raw)}
 function readerStep(d){const {r,t}=READER,i=r.tools.indexOf(t);READER.t=r.tools[(i+d+r.tools.length)%r.tools.length];renderReader(true)}
 $('#rtabs').onclick=e=>{const b=e.target.closest('.rtab');if(b){READER.t=b.dataset.t;renderReader(true)}};
 $('#rclose').onclick=closeReader;
@@ -3897,7 +4293,10 @@ $('#rraw').onclick=()=>{const s=READER.r.S[READER.t];s.raw=!s.raw;paint(READER.r
 $('#rcopy').onclick=e=>copyText(clean(READER.r.S[READER.t].out),e.currentTarget);
 document.addEventListener('keydown',e=>{if($('#reader').hidden)return;
   if(e.key==='Escape')closeReader();else if(e.key==='ArrowRight')readerStep(1);else if(e.key==='ArrowLeft')readerStep(-1)});
-document.addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeReader();show(a.dataset.go)}});
+document.addEventListener('click',e=>{
+  const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeReader();show(a.dataset.go);return}
+  const lb=e.target.closest('[data-login]');if(lb){e.preventDefault();post('/api/login/'+encodeURIComponent(lb.dataset.login)).then(()=>flash(lb,T('e.opened'))).catch(toast)}
+});
 
 /* ---------- History ---------- */
 async function loadHistory(){
@@ -3937,20 +4336,29 @@ function renderJudgeStats(d){
 
 /* ---------- Setup ---------- */
 let jobT=0;
+function connBadge(t){
+  const map={ready:[T('e.ready'),'ok'],auth_required:[T('e.authRequired'),'warn'],offline:[T('e.offline'),'bad'],
+    timeout:[T('e.timeout'),'warn'],missing:[T('e.missing'),'bad']};
+  const [lab,cls]=map[t.conn]||[t.path?T('e.ok'):T('e.missing'),t.path?'ok':'bad'];
+  return `<span class="state ${cls}">${esc(lab)}</span>${t.conn_detail?`<div class="sdetail">${esc(t.conn_detail)}</div>`:''}`;
+}
 async function loadEnv(){
   $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
+  for(const t of d.tools||[])if(t.conn)HEALTH[t.name]={state:t.conn,detail:t.conn_detail||''};
+  renderLanes();
   CFG.models_refreshing=true;modelsLater(0);
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
-      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
+      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ready':'lane.apiKey')}</span></td>
       <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
     const hint=t.hint||'';
-    const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
+    const loginCls=t.conn==='auth_required'?'btn sm primary':'btn sm';
+    const act=t.path?(t.login?`<button class="${loginCls}" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
     return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?`<small>${T('e.judge')}</small>`:''}</td>
-      <td><span class="state ${t.path?'ok':'bad'}">${t.path?T('e.ok'):T('e.missing')}</span></td><td>${esc(t.version||'—')}</td>
+      <td>${connBadge(t)}</td><td>${esc(t.version||'—')}</td>
       <td class="path">${esc(t.path||T('e.missingExe',t.exe))}</td><td>${act}</td></tr>`}).join('');
   $('#epath').textContent=d.path.split(':').join('\n');renderJobs(d.jobs);
 }
@@ -4047,7 +4455,7 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
   modelsLater(0);ppInit();
   COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
-  renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
+  renderLanes();refreshHealth(false);renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>
 """
@@ -4088,6 +4496,7 @@ def main():
     load_cfg()
     cleanup_staging()
     start_refresh_models()
+    start_refresh_health()
     srv = SRV = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     srv.daemon_threads = True
     if IDLE_EXIT:

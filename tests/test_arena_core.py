@@ -369,3 +369,222 @@ class ScoringModelCase(CoreCase):
         self.assertIsNone(arena.parse_judge(raw))  # the JSON is split across escaped stream events
         out = arena.parsed_output(arena.load_cfg()["tools"]["claude"], raw)
         self.assertEqual(arena.parse_judge(out)["best"], "A")
+
+
+class ConnectionHealthCase(CoreCase):
+    def _make_script(self, name, body):
+        p = self.tmp / name
+        p.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+        p.chmod(0o700)
+        return str(p)
+
+    def test_claude_auth_status_ready_logged_out_and_expired(self):
+        spec = arena.DEFAULT_CFG["tools"]["claude"]
+        ready_cli = self._make_script("claude-ok", """
+import json
+print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "email": "u@example.com", "loginExpiresAt": "2099-01-01T00:00:00Z"}))
+""")
+        state, detail = arena.check_tool_health("claude", spec, ready_cli, "en")
+        self.assertEqual((state, detail), ("ready", "claude.ai · u@example.com"))
+
+        out_cli = self._make_script("claude-out", """
+import json, sys
+print(json.dumps({"loggedIn": False, "authMethod": "none"}))
+sys.exit(1)
+""")
+        state, _ = arena.check_tool_health("claude", spec, out_cli, "en")
+        self.assertEqual(state, "auth_required")
+
+        exp_cli = self._make_script("claude-exp", """
+import json
+print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "loginExpiresAt": "2020-01-01T00:00:00Z"}))
+""")
+        state, detail = arena.check_tool_health("claude", spec, exp_cli, "en")
+        self.assertEqual(state, "auth_required")
+        self.assertEqual(detail, arena.M("en", "health_expired"))
+
+    def test_codex_login_status_ready_and_logged_out(self):
+        spec = arena.DEFAULT_CFG["tools"]["codex"]
+        ready_cli = self._make_script("codex-ok", 'import sys\nprint("Logged in using ChatGPT", file=sys.stderr)\n')
+        state, detail = arena.check_tool_health("codex", spec, ready_cli, "en")
+        self.assertEqual((state, detail), ("ready", "Logged in using ChatGPT"))
+
+        out_cli = self._make_script("codex-out", 'import sys\nprint("WARNING: helper\\nNot logged in", file=sys.stderr)\nsys.exit(1)\n')
+        state, _ = arena.check_tool_health("codex", spec, out_cli, "en")
+        self.assertEqual(state, "auth_required")
+
+    def test_antigravity_health_ready_auth_offline_and_timeout(self):
+        spec = arena.DEFAULT_CFG["tools"]["antigravity"]
+        with mock.patch.dict(arena.MODEL_CACHE, {}, clear=True):
+            with mock.patch.object(arena, "run_streaming", return_value=(0, "gemini-4-neon-high  Gemini 4 Neon\n", "")):
+                state, detail = arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+                self.assertEqual(state, "ready")
+                self.assertIn("1", detail)
+            with mock.patch.object(arena, "run_streaming", return_value=(1, "", "Error: Please sign in to view available models.")):
+                state, _ = arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+                self.assertEqual(state, "auth_required")
+            with mock.patch.object(arena, "run_streaming", return_value=(1, "", "Error: dial tcp: connection refused")):
+                state, _ = arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+                self.assertEqual(state, "offline")
+            with mock.patch.object(arena, "run_streaming", return_value=(None, "", "")):
+                state, _ = arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+                self.assertEqual(state, "timeout")
+
+    def test_grok_health_ready_and_not_authenticated(self):
+        spec = arena.DEFAULT_CFG["tools"]["grok"]
+        ready_cli = self._make_script("grok-ok", 'print("You are logged in with grok.com.\\nAvailable models:")\n')
+        state, detail = arena.check_tool_health("grok", spec, ready_cli, "en")
+        self.assertEqual((state, detail), ("ready", "You are logged in with grok.com."))
+
+        out_cli = self._make_script("grok-out", 'print("You are not authenticated.\\nAvailable models:")\n')
+        state, _ = arena.check_tool_health("grok", spec, out_cli, "en")
+        self.assertEqual(state, "auth_required")
+
+    def test_health_endpoint_returns_probed_states(self):
+        port = self.serve()
+        with mock.patch.dict(arena.HEALTH_CACHE, {}, clear=True), \
+             mock.patch.object(arena, "which", return_value="/bin/echo"), \
+             mock.patch.object(arena, "check_tool_health", side_effect=lambda n, s, p, l="en": ("auth_required", "need login") if n == "claude" else ("ready", "ok")):
+            status, payload = self.call(port, "GET", "/api/health?refresh=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["tools"]["claude"]["state"], "auth_required")
+        self.assertEqual(payload["tools"]["codex"]["state"], "ready")
+
+
+class RuntimeDisconnectDetectionCase(CoreCase):
+    def test_idle_timeout_stops_silent_process_early(self):
+        run = arena.Run("r-idle", ["slow"])
+        started = arena.time.monotonic()
+        with mock.patch.dict(arena.HEALTH_CACHE, {}, clear=True):
+            arena.exec_tool(run, "slow", {"cmd": ["/bin/sh", "-c", "sleep 5"]}, "hi", str(self.folder), 10, idle_timeout=0.15)
+            took = arena.time.monotonic() - started
+            row = arena.q("SELECT status, log FROM outputs WHERE run_id='r-idle'", one=True)
+            self.assertEqual(row["status"], "idle_timeout")
+            self.assertLess(took, 2.0)
+            self.assertIn("[timeout]", row["log"])
+            self.assertEqual(arena.HEALTH_CACHE["slow"]["state"], "timeout")
+
+    def test_active_output_resets_idle_timeout(self):
+        run = arena.Run("r-active", ["chatty"])
+        script = "for i in 1 2 3 4; do echo line$i; sleep 0.06; done"
+        arena.exec_tool(run, "chatty", {"cmd": ["/bin/sh", "-c", script]}, "hi", str(self.folder), 5, idle_timeout=0.25)
+        row = arena.q("SELECT status, output FROM outputs WHERE run_id='r-active'", one=True)
+        self.assertEqual(row["status"], "ok")
+        self.assertEqual(row["output"], "line1\nline2\nline3\nline4\n")
+
+    def test_nonzero_exit_auth_and_offline_are_classified(self):
+        with mock.patch.dict(arena.HEALTH_CACHE, {}, clear=True):
+            run1 = arena.Run("r-auth", ["claude"])
+            arena.exec_tool(run1, "claude", {"cmd": ["/bin/sh", "-c", "echo 'Authentication failed: please run /login' >&2; exit 1"]},
+                            "hi", str(self.folder), 5, idle_timeout=5)
+            self.assertEqual(arena.q("SELECT status FROM outputs WHERE run_id='r-auth'", one=True)["status"], "auth_required")
+            self.assertEqual(arena.HEALTH_CACHE["claude"]["state"], "auth_required")
+
+            run2 = arena.Run("r-off", ["codex"])
+            arena.exec_tool(run2, "codex", {"cmd": ["/bin/sh", "-c", "echo 'TypeError: fetch failed (ECONNREFUSED)' >&2; exit 1"]},
+                            "hi", str(self.folder), 5, idle_timeout=5)
+            self.assertEqual(arena.q("SELECT status FROM outputs WHERE run_id='r-off'", one=True)["status"], "offline")
+            self.assertEqual(arena.HEALTH_CACHE["codex"]["state"], "offline")
+
+    def test_zero_exit_with_stream_error_and_no_answer_is_not_ok(self):
+        claude_err = json.dumps({"type": "result", "is_error": True, "result": "Invalid API key · Please run /login"})
+        run1 = arena.Run("r-claude-z", ["claude"])
+        arena.exec_tool(run1, "claude", {"cmd": ["/bin/sh", "-c", f"printf '%s\\n' {json.dumps(claude_err)}"], "parser": "claude_stream"},
+                        "hi", str(self.folder), 5, idle_timeout=5)
+        row1 = arena.q("SELECT status, output, log FROM outputs WHERE run_id='r-claude-z'", one=True)
+        self.assertEqual(row1["status"], "auth_required")
+        self.assertEqual(row1["output"], "")
+        self.assertIn("Invalid API key", row1["log"])
+
+        agy_err = json.dumps({"event": "result", "status": "FAILED", "error": "connection reset by peer"})
+        run2 = arena.Run("r-agy-z", ["antigravity"])
+        arena.exec_tool(run2, "antigravity", {"cmd": ["/bin/sh", "-c", f"printf '%s\\n' {json.dumps(agy_err)}"], "parser": "agy_stream"},
+                        "hi", str(self.folder), 5, idle_timeout=5)
+        row2 = arena.q("SELECT status, output FROM outputs WHERE run_id='r-agy-z'", one=True)
+        self.assertEqual(row2["status"], "offline")
+        self.assertEqual(row2["output"], "")
+
+    def test_antigravity_login_and_health_follow_desktop_sync_app_data_dir(self):
+        spec = arena.DEFAULT_CFG["tools"]["antigravity"]
+        arena.set_setting("antigravity_desktop_sync", False)
+        self.assertEqual(arena._login_command("antigravity", spec), "agy")
+        seen_args = []
+
+        def fake_run(exe, args, sp, cwd, timeout, on_text, **kw):
+            seen_args.append((list(args), kw.get("stop_on_auth_prompt")))
+            return 0, "gemini-4-neon-high  Gemini 4 Neon\n", ""
+
+        with mock.patch.object(arena, "run_streaming", side_effect=fake_run):
+            arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+            arena.set_setting("antigravity_desktop_sync", True)
+            self.assertEqual(arena._login_command("antigravity", spec), "agy --app_data_dir=antigravity-arena")
+            arena.check_tool_health("antigravity", spec, "/bin/agy", "en")
+        self.assertEqual(seen_args, [(["models"], True), (["--app_data_dir=antigravity-arena", "models"], True)])
+
+        with mock.patch.object(arena.sys, "platform", "linux"):
+            msg = arena.open_login("antigravity", "en")
+        self.assertIn("agy --app_data_dir=antigravity-arena", msg)
+
+    def test_interactive_oauth_prompt_fails_fast_instead_of_waiting_for_timeout(self):
+        prompt_lines = (
+            "Authentication required. Please visit the URL to log in:\\n"
+            "  https://accounts.google.com/o/oauth2/auth?state=x\\n"
+            "Waiting for authentication (timeout 60s)...\\n"
+        )
+        # Case 1: agy prints OAuth prompt to stderr and hangs waiting 60s
+        with mock.patch.dict(arena.HEALTH_CACHE, {}, clear=True):
+            run1 = arena.Run("r-agy-auth-err", ["antigravity"])
+            started = arena.time.monotonic()
+            arena.exec_tool(run1, "antigravity",
+                            {"cmd": ["/bin/sh", "-c", f"printf '{prompt_lines}' >&2; sleep 10"], "parser": "agy_stream"},
+                            "hi", str(self.folder), 10, idle_timeout=10)
+            took = arena.time.monotonic() - started
+            row1 = arena.q("SELECT status, output, log FROM outputs WHERE run_id='r-agy-auth-err'", one=True)
+            self.assertLess(took, 3.0)
+            self.assertEqual(row1["status"], "auth_required")
+            self.assertEqual(row1["output"], "")
+            self.assertIn("Authentication required", row1["log"])
+            self.assertEqual(arena.HEALTH_CACHE["antigravity"]["state"], "auth_required")
+
+        # Case 2: agy prints OAuth prompt to stdout (non-JSON) and hangs
+        run2 = arena.Run("r-agy-auth-out", ["antigravity"])
+        started = arena.time.monotonic()
+        arena.exec_tool(run2, "antigravity",
+                        {"cmd": ["/bin/sh", "-c", f"printf '{prompt_lines}'; sleep 10"], "parser": "agy_stream"},
+                        "hi", str(self.folder), 10, idle_timeout=10)
+        took = arena.time.monotonic() - started
+        row2 = arena.q("SELECT status, output, log FROM outputs WHERE run_id='r-agy-auth-out'", one=True)
+        self.assertLess(took, 3.0)
+        self.assertEqual(row2["status"], "auth_required")
+        self.assertEqual(row2["output"], "")
+        self.assertIn("Authentication required", row2["log"])
+
+        # Case 3: health probe also fails fast as auth_required (not timeout) when agy models prompts for OAuth
+        hanging_cli = self.tmp / "agy-auth-hang"
+        hanging_cli.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, time\n"
+            "sys.stderr.write('Authentication required. Please visit the URL to log in:\\nWaiting for authentication (timeout 60s)...\\n')\n"
+            "sys.stderr.flush()\n"
+            "time.sleep(10)\n",
+            encoding="utf-8",
+        )
+        hanging_cli.chmod(0o700)
+        spec = dict(arena.DEFAULT_CFG["tools"]["antigravity"], pty=False)
+        started = arena.time.monotonic()
+        state, _ = arena.check_tool_health("antigravity", spec, str(hanging_cli), "en")
+        self.assertLess(arena.time.monotonic() - started, 3.0)
+        self.assertEqual(state, "auth_required")
+
+        # Case 4: normal JSON answer mentioning the phrase must NOT be killed or misclassified
+        answer_ev = json.dumps({"event": "step_update", "step_type": "agent_response",
+                                "text_delta": "Example prompt: Authentication required. Please visit the URL to log in:"})
+        result_ev = json.dumps({"event": "result", "status": "SUCCESS"})
+        run3 = arena.Run("r-agy-ok-text", ["antigravity"])
+        arena.exec_tool(run3, "antigravity",
+                        {"cmd": ["/bin/sh", "-c", f"printf '%s\\n%s\\n' {json.dumps(answer_ev)} {json.dumps(result_ev)}"],
+                         "parser": "agy_stream"},
+                        "hi", str(self.folder), 5, idle_timeout=5)
+        row3 = arena.q("SELECT status, output FROM outputs WHERE run_id='r-agy-ok-text'", one=True)
+        self.assertEqual(row3["status"], "ok")
+        self.assertIn("Authentication required", row3["output"])

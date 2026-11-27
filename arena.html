@@ -266,7 +266,13 @@ body.ppo #pp{transform:none;visibility:visible;transition:transform .22s ease}
 .state{font-size:12px;padding:1px 9px;border-radius:999px;white-space:nowrap;background:var(--soft);color:var(--muted)}
 .state.run{color:var(--focus);background:color-mix(in srgb,var(--focus) 12%,transparent)}
 .state.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.state.warn{color:var(--gold);background:var(--gold-bg)}
 .state.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.sdetail{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.4;word-break:break-word}
+.lhealth{font-size:11px;padding:1px 7px;border-radius:999px;border:0;cursor:pointer;white-space:nowrap;flex:none;font-weight:500}
+.lhealth.bad{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.lhealth.warn{color:var(--gold);background:var(--gold-bg)}
+.ph .btn{margin:0 4px 0 2px;vertical-align:baseline}
 .tm{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:3.2em;text-align:right}
 .body{flex:1;padding:8px 20px 14px;max-height:min(60vh,620px);overflow:auto;overscroll-behavior:contain;min-height:150px}
 .col.full .body{max-height:none}
@@ -533,7 +539,7 @@ function flash(b,t){if(b.dataset.f)return;b.dataset.f=1;const o=b.innerHTML;b.te
 function copyText(t,b){navigator.clipboard.writeText(t).then(()=>b&&flash(b,'✓')).catch(()=>toast(T('copyFail')))}
 
 /* ---------- Config and model pickers ---------- */
-let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
+let CFG={tools:{},order:[],tags:[]},SEL={},CUSTOM={},HEALTH={},SHOW_OPENAI=ls.get('arenaShowOpenai',false)===true;
 const openaiShown=()=>SHOW_OPENAI&&CFG.tools.openai?.ready!==false;  // hidden whenever no API key is set
 const visibleTools=()=>CFG.order.filter(t=>t!=='openai'||openaiShown());
 const openaiSelected=()=>openaiShown()&&SEL.openai?.on===true;
@@ -544,13 +550,21 @@ const dlabel=t=>CFG.tools[t]?.default_label||T('default');
 function modelLabel(t,id){if(!id)return dlabel(t);const m=(CFG.tools[t]?.models||[]).find(x=>x.id===id);return m?m.label:id}
 /* A model ID that already names its level (gemini-4-neon-high) fixes the effort: the picker shows that level and is disabled, and the server sends no separate effort flag. */
 const modelEffort=t=>{const m=/-(minimal|low|medium|high|xhigh|max)$/.exec(SEL[t]?.model||'');return m&&(CFG.tools[t].efforts||[]).includes(m[1])?m[1]:''};
+function laneHealthBadge(t){
+  const h=HEALTH[t];if(!h)return '';
+  const map={auth_required:['lane.authRequired','warn'],offline:['lane.offline','bad'],timeout:['lane.timeout','warn'],missing:['lane.missing','bad']};
+  const m=map[h.state];if(!m)return '';
+  const tip=[h.detail,T('lane.healthHint')].filter(Boolean).join('\n');
+  return `<button class="lhealth ${m[1]}" type="button" data-go="env" title="${esc(tip)}">${esc(T(m[0]))}</button>`;
+}
+async function refreshHealth(force){try{const d=await api('/api/health'+(force?'?refresh=1':''));HEALTH=d.tools||{};renderLanes()}catch(e){}}
 function renderLanes(){
   const tools=visibleTools();
   $('#lanes').style.gridTemplateColumns=tools.length?`repeat(${tools.length},minmax(0,1fr))`:'';
   $('#lanes').innerHTML=tools.map(t=>{const v=CFG.tools[t],sel=SEL[t],own=modelEffort(t);
     const opts=[{id:'',label:v.ready===false?T('lane.apiKey'):dlabel(t)},...v.models,...(CUSTOM[t]||[]).map(id=>({id,label:id}))];
     return `<div class="lane${sel.on?'':' off'}" style="--c:${esc(v.color)}" data-t="${esc(t)}">
-      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>
+      <button class="lsw" role="switch" aria-checked="${sel.on}" aria-disabled="${v.ready===false}" title="${esc(T(v.ready===false?'lane.apiSetup':'lane.on'))}"><span class="box"></span>${esc(tname(t))}</button>${laneHealthBadge(t)}
       <select class="mdl${sel.model?' set':''}" aria-label="${esc(T('lane.modelAria',tname(t)))}" title="${esc(T('lane.model'))}" ${v.flag&&v.ready!==false?'':'disabled'}>
         ${opts.map(o=>`<option value="${esc(o.id)}"${o.id===sel.model?' selected':''}>${esc(o.label)}</option>`).join('')}
         ${v.flag?`<option value="__custom">${esc(T('lane.custom'))}</option>`:''}</select>
@@ -679,9 +693,12 @@ function makeCol(r,t,parent){
   $('.win',c).onclick=()=>setWinner(r,r.winner===t?'':t);
   parent.appendChild(c);paint(r,t);
 }
-function content(s){
+function content(s,t){
   if(s.out)return s.raw?`<pre class="rawtxt">${esc(clean(s.out))}</pre>`:`<div class="md">${md(s.out)}</div>`;
   if(s.status==='not_installed')return `<p class="ph">${T('c.notFound')}<a href="#" data-go="env">${T('c.install')}</a></p>`;
+  if(s.status==='auth_required')return `<p class="ph">${T('c.authRequired')}${t?`<button class="btn sm primary" type="button" data-login="${esc(t)}">${T('c.signInNow')}</button>`:''}<a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
+  if(s.status==='offline')return `<p class="ph">${T('c.offline')} <a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
+  if(s.status==='idle_timeout')return `<p class="ph">${T('c.idleTimeout')} <a href="#" data-go="env">${T('c.openSetup')}</a></p>`;
   if(s.status==='run')return `<p class="ph thinking">${T('c.thinking')}</p>`;
   if(s.status)return `<p class="ph">${T('c.noOut')}</p>`;
   return `<p class="ph">${T('st.queued')}</p>`;
@@ -693,7 +710,7 @@ function paint(r,t){dirty.set(r.id+'|'+t,[r,t]);if(!raf)raf=requestAnimationFram
 function render(r,t){
   const s=r.S[t],c=s&&s.el;if(!c)return;
   const body=$('.body',c),atBottom=body.scrollHeight-body.scrollTop-body.clientHeight<60;
-  body.innerHTML=content(s);decorate(body);
+  body.innerHTML=content(s,t);decorate(body);
   c.classList.toggle('full',s.full);
   if(s.status==='run'&&atBottom&&!s.full)body.scrollTop=body.scrollHeight;
   c.classList.toggle('overflow',s.full||body.scrollHeight>body.clientHeight+8);
@@ -721,7 +738,9 @@ function openStream(r){
     const s=r.S[ev.tool];if(!s)return;
     if(ev.type==='start'){s.status='run';s.t0=Date.now();if(ev.model!=null)s.model=ev.model;if(ev.effort!=null)s.effort=ev.effort;setRunning(r,true);$('.ch b',s.el).title=ev.cmd||''}
     else if(ev.type==='out')s.out+=ev.data;else if(ev.type==='log')s.log+=ev.data;
-    else if(ev.type==='meta')s.actual=ev.model;else if(ev.type==='done'){s.status=ev.status;s.secs=ev.seconds}
+    else if(ev.type==='meta')s.actual=ev.model;else if(ev.type==='done'){s.status=ev.status;s.secs=ev.seconds;
+      const hm={ok:'ready',auth_required:'auth_required',offline:'offline',idle_timeout:'timeout',not_installed:'missing'};
+      if(hm[ev.status]){HEALTH[ev.tool]={state:hm[ev.status],detail:ev.status==='ok'?(HEALTH[ev.tool]?.state==='ready'?HEALTH[ev.tool].detail:''):''};renderLanes()}}
     paint(r,ev.tool)};
 }
 function paintStars(r,t){$$('.star',r.S[t].el).forEach(b=>b.classList.toggle('on',+b.dataset.v<=r.S[t].score))}
@@ -1011,7 +1030,7 @@ function openReader(r,t){READER.r=r;READER.t=t;$('#reader').hidden=false;documen
 function closeReader(){READER.r=null;$('#reader').hidden=true;document.documentElement.classList.remove('lock')}
 function renderReader(reset){const {r,t}=READER;if(!r)return;const s=r.S[t],doc=$('#rdoc'),y=doc.scrollTop;
   $('#rtabs').innerHTML=r.tools.map(x=>`<button class="rtab${x===t?' on':''}" data-t="${esc(x)}" style="--c:${esc(color(x))}"><span class="dot"></span>${esc(tname(x))}<small>${esc(modelText(r,x))}${r.S[x]?.effort?' '+esc(r.S[x].effort):''}</small></button>`).join('');
-  $('#rq').textContent=r.meta.prompt;doc.innerHTML=content(s);decorate(doc);doc.scrollTop=reset?0:y;$('#rraw').setAttribute('aria-pressed',s.raw)}
+  $('#rq').textContent=r.meta.prompt;doc.innerHTML=content(s,t);decorate(doc);doc.scrollTop=reset?0:y;$('#rraw').setAttribute('aria-pressed',s.raw)}
 function readerStep(d){const {r,t}=READER,i=r.tools.indexOf(t);READER.t=r.tools[(i+d+r.tools.length)%r.tools.length];renderReader(true)}
 $('#rtabs').onclick=e=>{const b=e.target.closest('.rtab');if(b){READER.t=b.dataset.t;renderReader(true)}};
 $('#rclose').onclick=closeReader;
@@ -1020,7 +1039,10 @@ $('#rraw').onclick=()=>{const s=READER.r.S[READER.t];s.raw=!s.raw;paint(READER.r
 $('#rcopy').onclick=e=>copyText(clean(READER.r.S[READER.t].out),e.currentTarget);
 document.addEventListener('keydown',e=>{if($('#reader').hidden)return;
   if(e.key==='Escape')closeReader();else if(e.key==='ArrowRight')readerStep(1);else if(e.key==='ArrowLeft')readerStep(-1)});
-document.addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeReader();show(a.dataset.go)}});
+document.addEventListener('click',e=>{
+  const a=e.target.closest('[data-go]');if(a){e.preventDefault();closeReader();show(a.dataset.go);return}
+  const lb=e.target.closest('[data-login]');if(lb){e.preventDefault();post('/api/login/'+encodeURIComponent(lb.dataset.login)).then(()=>flash(lb,T('e.opened'))).catch(toast)}
+});
 
 /* ---------- History ---------- */
 async function loadHistory(){
@@ -1060,20 +1082,29 @@ function renderJudgeStats(d){
 
 /* ---------- Setup ---------- */
 let jobT=0;
+function connBadge(t){
+  const map={ready:[T('e.ready'),'ok'],auth_required:[T('e.authRequired'),'warn'],offline:[T('e.offline'),'bad'],
+    timeout:[T('e.timeout'),'warn'],missing:[T('e.missing'),'bad']};
+  const [lab,cls]=map[t.conn]||[t.path?T('e.ok'):T('e.missing'),t.path?'ok':'bad'];
+  return `<span class="state ${cls}">${esc(lab)}</span>${t.conn_detail?`<div class="sdetail">${esc(t.conn_detail)}</div>`:''}`;
+}
 async function loadEnv(){
   $('#etable').innerHTML=`<tr><td style="color:var(--muted)">${T('e.checking')}</td></tr>`;
   let d;try{d=await api('/api/doctor')}catch(e){$('#etable').innerHTML=`<tr><td>${esc(e)}</td></tr>`;return}
+  for(const t of d.tools||[])if(t.conn)HEALTH[t.name]={state:t.conn,detail:t.conn_detail||''};
+  renderLanes();
   CFG.models_refreshing=true;modelsLater(0);
   $('#envNode').textContent=(d.node?T('e.node',d.node):T('e.noNode'))+T('e.where');
   $('#etable').innerHTML='<tr>'+['e.tool','e.status','e.ver','e.path','e.act'].map(k=>`<th>${T(k)}</th>`).join('')+'</tr>'+d.tools.map(t=>{const job=d.jobs[t.name]||{};
     if(t.api)return `<tr data-openai-row${SHOW_OPENAI?'':' hidden'}><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}</td>
-      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ok':'lane.apiKey')}</span></td>
+      <td><span class="state ${t.ready?'ok':'bad'}">${T(t.ready?'e.ready':'lane.apiKey')}</span></td>
       <td>${esc(t.version)}</td><td class="path">${esc(t.path)}</td><td>${esc(T('lane.apiSetup'))}</td></tr>`;
     const hint=t.hint||'';
-    const act=t.path?(t.login?`<button class="btn sm" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
+    const loginCls=t.conn==='auth_required'?'btn sm primary':'btn sm';
+    const act=t.path?(t.login?`<button class="${loginCls}" data-a="login" data-t="${esc(t.name)}">${T('e.login')}</button><div class="hint">${esc(hint)}</div>`:'—')
       :(t.install?`<button class="btn sm primary" data-a="install" data-t="${esc(t.name)}" ${job.running?'disabled':''}>${job.running?T('e.installing'):T('e.install')}</button>`:'—');
     return `<tr><td class="tool" style="--c:${esc(color(t.name))}"><span class="dot"></span>${esc(tname(t.name))}${t.role==='judge'?`<small>${T('e.judge')}</small>`:''}</td>
-      <td><span class="state ${t.path?'ok':'bad'}">${t.path?T('e.ok'):T('e.missing')}</span></td><td>${esc(t.version||'—')}</td>
+      <td>${connBadge(t)}</td><td>${esc(t.version||'—')}</td>
       <td class="path">${esc(t.path||T('e.missingExe',t.exe))}</td><td>${act}</td></tr>`}).join('');
   $('#epath').textContent=d.path.split(':').join('\n');renderJobs(d.jobs);
 }
@@ -1170,6 +1201,6 @@ $('#quit').onclick=()=>{if(!confirm(T('quit.confirm')))return;
   $('#chatMode').onchange=e=>{CHAT=e.target.checked;ls.set('arenaChat',CHAT)};
   modelsLater(0);ppInit();
   COMPOSER_ATT=makeAttacher($('#atts'),$('#attInput'),$('.composer'),$('#attBtn'));
-  renderLanes();renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
+  renderLanes();refreshHealth(false);renderJudgeOpt();refreshTags();loadFeed().catch(toast);$('#prompt').focus();
 })();
 </script></body></html>
